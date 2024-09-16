@@ -1,0 +1,13 @@
+pipeline:
+  class_path: preprocessing.pipeline.DynamicPipeline
+  init_args:
+    lp_freq: 75
+    do_ica: True
+    line_freqs: [60]
+dataset_path: /scratch/agjma/eegmmidb/
+out_path: /scratch/agjma/preprocess_mmidb_ica/
+log_path: preprocess_mmidb_ica.log 
+overwrite: False
+shuffle_files: True
+batch_size: 4
+n_jobs: 16

@@ -1,0 +1,9 @@
+# base stuff
+torch >= 2.1.0
+moabb >= 0.5.0
+braindecode >= 0.7
+
+# for training
+pytorch-lightning >= 2.1.0
+jsonargparse >= 4.24.0
+wandb >= 0.15.12

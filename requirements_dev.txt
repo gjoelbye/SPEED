@@ -1,0 +1,5 @@
+# linting, formatting etc.
+ruff >= 0.1.1
+
+# testing
+pytest >= 7.4.2

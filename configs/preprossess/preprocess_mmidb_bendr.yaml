@@ -1,0 +1,9 @@
+pipeline:
+  class_path: preprocessing.pipeline.DynamicPipelineBENDR
+dataset_path: /scratch/agjma/eegmmidb/
+out_path: /scratch/agjma/preprocess_mmidb_bendr/
+log_path: preprocess_mmidb_bendr.log 
+overwrite: False
+shuffle_files: True
+batch_size: 4
+n_jobs: 16
