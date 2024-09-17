@@ -9,7 +9,7 @@ from tqdm import tqdm
 import logging
 import os, glob
 from joblib import Parallel, delayed
-from preprocessing.pipeline import Pipeline
+from preprocess.pipeline import Pipeline
 import warnings
 from time import sleep
 from pathlib import Path

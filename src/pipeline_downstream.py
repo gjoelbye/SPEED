@@ -2,13 +2,13 @@ import mne
 import logging
 from pathlib import Path
 import logging
-from preprocessing.utils import split_raw, get_unannotated_raw, split_raw_annotations
-from preprocessing.methods import PreprocessMethods
+from preprocess.utils import split_raw, get_unannotated_raw, split_raw_annotations
+from preprocess.methods import PreprocessMethods
 
 # Import typing
 from typing import Tuple, List, Optional
 
-from preprocessing.pipeline import BasePipeline
+from preprocess.pipeline import BasePipeline
 
 class DownstreamPipeline(BasePipeline):
     def __init__(self, descriptions: List[str], tmin: float = -0.5, tlen: float = 5.0, **kwargs):
