@@ -1,0 +1,9 @@
+pipeline:
+  class_path: preprocessing.pipeline.DynamicPipelineBENDR
+dataset_path: {DATASET_PATH}
+out_path: {OUTPUT_PATH}
+log_path: {LOG_PATH}
+overwrite: False
+shuffle_files: True
+batch_size: 5
+n_jobs: 20

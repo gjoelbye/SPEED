@@ -100,9 +100,9 @@ pipeline:
     lp_freq: 75
     do_ica: False
     line_freqs: [60]
-dataset_path: /path/to/your/dataset/
-out_path: /path/to/output/directory/
-log_path: preprocessing.log 
+dataset_path: {DATASET_PATH}
+out_path: {OUTPUT_PATH}
+log_path: {LOG_PATH}
 overwrite: False
 shuffle_files: True
 batch_size: 4
