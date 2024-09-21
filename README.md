@@ -4,6 +4,8 @@
 ## Overview
 This repository contains the source code and resources for the paper "[SPEED: Scalable Preprocessing of EEG Data for Self-Supervised Learning](https://arxiv.org/abs/2408.08065)" presented at the 2024 IEEE International Workshop on Machine Learning for Signal Processing. The pipeline is designed to efficiently preprocess large-scale EEG data for self-supervised learning models, improving stability and performance on downstream tasks.
 
+![Lightning McQueen](speed.gif)
+
 ### Key Features:
 - **Scalable Preprocessing:** Efficient handling of large EEG datasets, such as the Temple University Hospital EEG Corpus.
 - **Self-Supervised Learning Compatibility:** Optimized for SSL frameworks to enhance model performance on various downstream tasks.
