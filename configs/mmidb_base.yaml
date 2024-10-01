@@ -1,5 +1,5 @@
 pipeline:
-  class_path: preprocessing.pipeline.DynamicPipelineBENDR
+  class_path: src.pipeline.DynamicPipelineBENDR
 dataset_path: {DATASET_PATH}
 out_path: {OUTPUT_PATH}
 log_path: {LOG_PATH}
