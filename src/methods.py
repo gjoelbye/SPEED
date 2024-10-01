@@ -9,7 +9,7 @@ from meegkit.detrend import detrend
 from meegkit.dss import dss_line_iter
 from torch.nn.functional import interpolate
 from torch import tensor
-from preprocess.utils import create_channel_type_dict, heuristic_resolution
+from src.utils import create_channel_type_dict, heuristic_resolution
 
 class PreprocessMethods:
     def to_standard_names(raw):

@@ -8,8 +8,8 @@ import h5py
 from collections import OrderedDict
 from datetime import datetime
 from time import sleep
-from preprocess.utils import split_raw, make_tuh_montage
-from preprocess.methods import PreprocessMethods
+from src.utils import split_raw, make_tuh_montage
+from src.methods import PreprocessMethods
 
 # Import typing
 from typing import Tuple, List, Optional, Dict

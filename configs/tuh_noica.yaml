@@ -1,5 +1,5 @@
 pipeline:
-  class_path: preprocessing.pipeline.DynamicPipeline
+  class_path: src.pipeline.DynamicPipeline
   init_args:
     do_ica: False
     line_freqs: [60]

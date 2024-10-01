@@ -2,8 +2,8 @@ import mne
 import logging
 from pathlib import Path
 import logging
-from preprocess.utils import split_raw, get_unannotated_raw, split_raw_annotations
-from preprocess.methods import PreprocessMethods
+from src.utils import split_raw, get_unannotated_raw, split_raw_annotations
+from src.methods import PreprocessMethods
 
 # Import typing
 from typing import Tuple, List, Optional
