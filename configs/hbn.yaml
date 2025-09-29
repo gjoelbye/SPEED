@@ -1,0 +1,13 @@
+pipeline:
+  class_path: speed.pipeline_challenge.PretrainPipeline
+  init_args:
+    do_ica: False
+    line_freqs: [60]
+dataset_path: "/scratch/linsk/hbn_test"
+out_path: "/scratch/linsk/hbn_test_preprocessed"
+log_path: "/scratch/linsk/hbn_test_log.txt"
+file_extension: "RestingState_eeg.set"
+overwrite: False
+shuffle_files: True
+batch_size: 2
+n_jobs: 1

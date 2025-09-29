@@ -9,7 +9,7 @@ from meegkit.detrend import detrend
 from meegkit.dss import dss_line_iter
 from torch.nn.functional import interpolate
 from torch import tensor
-from src.utils import create_channel_type_dict, heuristic_resolution
+from speed.utils import create_channel_type_dict, heuristic_resolution
 
 class PreprocessMethods:
     def to_standard_names(raw):
@@ -25,16 +25,42 @@ class PreprocessMethods:
         
         raw.rename_channels(rename_map)
 
-    def evaluate_quality(raw, oha_threshold=40e-6, thv_threshold=40e-6, chv_threshold=80e-6,
-                        min_unique=100, min_nchans=10, line_freqs=[60], hp_freq=0.5, lp_freq=100):
-        n_chans = raw.info['nchan']
+    def evaluate_quality(raw, 
+                        oha_threshold=40e-6, 
+                        thv_threshold=40e-6, 
+                        chv_threshold=80e-6,
+                        min_unique_ratio=0.001, # min_unique=100
+                        min_nchans=10, 
+                        line_freqs=[60], 
+                        hp_freq=0.5, 
+                        lp_freq=100,
+                        # percentile=95
+                        ):
+        """
+        Evaluate EEG recording quality.
         
+        Parameters:
+            raw : MNE Raw object
+            oha_threshold, thv_threshold, chv_threshold : amplitude/variance thresholds
+            min_unique_ratio : minimum fraction of unique samples per channel
+            min_nchans : minimum number of channels to accept recording
+            line_freqs : notch filter frequencies
+            hp_freq, lp_freq : bandpass filter
+            percentile : percentile for robust metric computation
+        Returns:
+            bool : True if recording passes QC
+        """
+        
+        n_chans = raw.info['nchan']
         if n_chans < min_nchans:
             return False
         
         raw = raw.copy()
-        
-        # Discrete Channels
+
+        # Discrete channels 
+#     unique_counts = np.array([len(np.unique(chan_data)) for chan_data in raw._data])
+#     discrete_channels = np.array(raw.ch_names)[unique_counts < min_unique].tolist()
+        min_unique = int(min_unique_ratio * raw.n_times)
         unique_counts = np.array([len(np.unique(chan_data)) for chan_data in raw._data])
         discrete_channels = np.array(raw.ch_names)[unique_counts < min_unique].tolist()
         
@@ -54,11 +80,14 @@ class PreprocessMethods:
         oha = np.mean(np.abs(raw._data) > oha_threshold)
         thv = np.mean(np.std(raw._data, axis=0) > thv_threshold)
         chv = np.mean(np.std(raw._data, axis=1) > chv_threshold)
-
+        
+        # Combine bad channels
         bad_channels = discrete_channels + noisychannels.get_bads()
         bcr = len(bad_channels) / n_chans
         
-        return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8)     
+        # return (oha < oha_threshold) & (thv < thv_threshold) & (chv < chv_threshold) & (bcr < 0.8)
+        return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8) 
+
 
     def interpolate_nearest(raw, sfreq=256.0):
         x = raw._data
@@ -78,10 +107,13 @@ class PreprocessMethods:
         raw._last_samps = np.array([resampled_data.shape[1] - 1])
 
     def set_montage(raw, montage):
-        drop_chs = [ch for ch in raw.ch_names if ch not in montage.ch_names]
-        raw.drop_channels(drop_chs)
-        raw.set_montage(montage)
-        return drop_chs
+        if montage is None:
+            return []
+        else:
+            drop_chs = [ch for ch in raw.ch_names if ch not in montage.ch_names]
+            raw.drop_channels(drop_chs)
+            raw.set_montage(montage)
+            return drop_chs
     
     def find_bad_channels(raw, ransac = True, drop = True):
         noisychannels = pyprep.NoisyChannels(raw)                
@@ -163,8 +195,9 @@ class PreprocessMethods:
         raw.info['bads'] = missing_ch
         
         # Setting montage for added channels
-        raw.set_montage(montage, verbose=False)
-        
+        if montage is not None: # Go over this again, bc maybe needed for HBN as well???
+            raw.set_montage(montage, verbose=False)
+
         # Built-in intepolation
         raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)
         return missing_ch
@@ -183,13 +216,22 @@ class PreprocessMethods:
         return missing_ch
     
     def drop_extra_and_reorder(raw, chs):
-        # List of extra channels
-        extra_ch = [c for c in raw.ch_names if c not in chs]
-        raw.drop_channels(extra_ch)
+        # chs is the 
+        if chs is None:
+            return []
+        else:
+            extra_ch = [c for c in raw.ch_names if c not in chs]
+            raw.drop_channels(extra_ch)
+            
+            # List of channel order
+            new_ch_order = [ch for ch in chs if ch in raw.ch_names]    
+            raw.reorder_channels(new_ch_order)    
+            
+            return extra_ch
         
-        # List of channel order
-        new_ch_order = [ch for ch in chs if ch in raw.ch_names]    
-        raw.reorder_channels(new_ch_order)    
-        
-        return extra_ch
+    def drop_channels_manually(raw, chs_to_remove):
+        """Drop specified channels from the raw data."""
+        existing_chs_to_remove = [ch for ch in chs_to_remove if ch in raw.ch_names]
+        raw.drop_channels(existing_chs_to_remove)
+        return existing_chs_to_remove
     
