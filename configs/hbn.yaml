@@ -3,6 +3,10 @@ pipeline:
   init_args:
     do_ica: False
     line_freqs: [60]
+    sfreq: 100
+    hp_freq: 0.5
+    lp_freq: 50
+    window_length: None
 dataset_path: "/scratch/linsk/hbn_test"
 out_path: "/scratch/linsk/hbn_test_preprocessed"
 log_path: "/scratch/linsk/hbn_test_log.txt"

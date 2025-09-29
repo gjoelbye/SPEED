@@ -97,6 +97,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
     # Split the EDF files into batches
     src_paths_batches = [src_paths[i:i + batch_size] for i in range(0, len(src_paths), batch_size)]
     
+    # no idea what's happening below to create destination files, but we need a file to file match; that is, the folder structure and file naming of raw vs preprocessed data should be the same.
     # Create destination files
     des_paths = []
     

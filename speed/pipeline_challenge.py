@@ -83,7 +83,7 @@ class BasePipeline(Pipeline):
         
     def _setup_montage_and_channels(self, montage_name, chs):
         """Setup montage and channels."""
-        self.chs = chs
+        self.chs = chs # TBD info.channels if chs is None?
         self.montage_name = montage_name
         
         if montage_name is None: 
@@ -155,15 +155,12 @@ class BasePipeline(Pipeline):
     def _drop_extra_and_reorder(self, raw: mne.io.Raw):
         return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
     
-    def _drop_channels_manually(self, raw: mne.io.Raw, chs_to_remove: List[str]):
-        return PreprocessMethods.drop_channels_manually(raw, chs_to_remove)
+    def _drop_channels_manually(self, raw: mne.io.Raw):
+        return PreprocessMethods.drop_channels_manually(raw, self.channels_to_remove)
 
 
 class PretrainPipeline(BasePipeline):
-    """
-        Diff: file format, rename channels / std names, montage setting, window size?, drop extra
-        Address too short window filter in cases where whole recording needs to be processed
-    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
     
@@ -190,7 +187,7 @@ class PretrainPipeline(BasePipeline):
 
                 # Drop manually specified channels
                 if self.channels_to_remove is not None:
-                    drop_chs = self._drop_channels_manually(raw_orig, self.channels_to_remove)
+                    drop_chs = self._drop_channels_manually(raw_orig)
                     logging.info(f"File: {src_paths[i].stem}.\tManually dropped {len(drop_chs)} channels: {drop_chs}.")
 
                 # Rename channels with channel_rename
@@ -245,6 +242,7 @@ class PretrainPipeline(BasePipeline):
         window_info_str = f"File: {filename}.\tTime: {(start_time, end_time)}."
                
         quality = self._evaluate_quality(raw)
+        # Instead of dropping like below, we want to keep the file but log the quality metrics (from the evaluate_quality function) into a separate file (incl. file name) , same below
         if not quality:
             raw = None
             logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
@@ -255,6 +253,7 @@ class PretrainPipeline(BasePipeline):
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
         quality = self._evaluate_quality(raw)
+        # same here
         if not quality:
             raw = None
             logging.info(f"{window_info_str}\tQuality check 2 failed. Dropping window.")
@@ -285,70 +284,70 @@ class PretrainPipeline(BasePipeline):
 
 
 
-class HBNFinetuning(BasePipeline):
-    """ 
-    Copy the whole process from note books ie splitting, annotating etc.
+# class HBNFinetuning(BasePipeline):
+#     """ 
+#     Copy the whole process from note books ie splitting, annotating etc.
 
-    Bad channel detection
-    Avg reference at the end after dropping bad channels
-    No ICA, montage setting
-    On full recording
-      """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+#     Bad channel detection
+#     Avg reference at the end after dropping bad channels
+#     No ICA, montage setting
+#     On full recording
+#       """
+#     def __init__(self, **kwargs):
+#         super().__init__(**kwargs)
     
-    def __call__(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
-        return self.run(src_paths)    
+#     def __call__(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
+#         return self.run(src_paths)    
 
-    def run(self, src_paths):
-        logging.debug("Loading EDF files...")
-        src_paths = [Path(src_path) for src_path in src_paths]
+#     def run(self, src_paths):
+#         logging.debug("Loading EDF files...")
+#         src_paths = [Path(src_path) for src_path in src_paths]
 
-        raws = []
-        times = []
-        indices = []
+#         raws = []
+#         times = []
+#         indices = []
 
 
-class HBNInference(BasePipeline):
-    """
-    Input: tensor, not mne raw object
-    same as finetuning but for 2s windows (GIVEN)
-    less extensive bad channel detection
+# class HBNInference(BasePipeline):
+#     """
+#     Input: tensor, not mne raw object
+#     same as finetuning but for 2s windows (GIVEN)
+#     less extensive bad channel detection
     
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+#     """
+#     def __init__(self, **kwargs):
+#         super().__init__(**kwargs)
     
-    def __call__(self): #-> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
-        # 1. fix output type, add input type and args
-        return self.run()    
+#     def __call__(self): #-> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
+#         # 1. fix output type, add input type and args
+#         return self.run()    
 
-    def run(self):
-        # 3. adjust all where 'raw' bc tensor input; add and fix output type and args
-        # input already filtered to 0.5-50 Hz range and downsampled to 100 Hz
+#     def run(self):
+#         # 3. adjust all where 'raw' bc tensor input; add and fix output type and args
+#         # input already filtered to 0.5-50 Hz range and downsampled to 100 Hz
 
-        # no renaming
-        # no montage setting
-        # no skipping
-        # no splitting, no loop through windows
+#         # no renaming
+#         # no montage setting
+#         # no skipping
+#         # no splitting, no loop through windows
 
-        try: 
-            # 1. adjust to do simple bad channel detection
-            # 2. fix interpolation/ montage setting
+#         try: 
+#             # 1. adjust to do simple bad channel detection
+#             # 2. fix interpolation/ montage setting
             
-            # no quality assesment bc not gonna drop anyway
-            # no Zapline bc 50*2 not < 100  = 200/2 nyquist
-            # no detrending
+#             # no quality assesment bc not gonna drop anyway
+#             # no Zapline bc 50*2 not < 100  = 200/2 nyquist
+#             # no detrending
 
-            bad_chs = self._drop_bad_channels(raw) # change this to simpler/ less 
-            logging.info(f"Found {len(bad_chs)} bad channels: {bad_chs}.")
-            self._average_reference(raw)
-            missing_chs = self._interpolate_missing(raw) # maybe change this bc do i need to set montage for interpolated channels or can i work around that? 
-            logging.info(f"Intepolating {len(missing_chs)} channels: {missing_chs}.")
-        except Exception as e:
-            logging.error(f"Error during preprocessing: {e}")
-            raw = None
-            return raw
+#             bad_chs = self._drop_bad_channels(raw) # change this to simpler/ less 
+#             logging.info(f"Found {len(bad_chs)} bad channels: {bad_chs}.")
+#             self._average_reference(raw)
+#             missing_chs = self._interpolate_missing(raw) # maybe change this bc do i need to set montage for interpolated channels or can i work around that? 
+#             logging.info(f"Intepolating {len(missing_chs)} channels: {missing_chs}.")
+#         except Exception as e:
+#             logging.error(f"Error during preprocessing: {e}")
+#             raw = None
+#             return raw
         
-        return raw
+#         return raw
 
