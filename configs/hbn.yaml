@@ -7,6 +7,12 @@ pipeline:
     hp_freq: 0.5
     lp_freq: 50
     window_length: None
+    metrics_path: "/scratch/linsk/"
+    return_quality_metrics: True
+    drop_bad_quality: False
+    channnels_to_remove: [] # fill
+    channels: #? needed else reorder wont work
+    montage: None # and all other stuff like tin notebook 
 dataset_path: "/scratch/linsk/hbn_test"
 out_path: "/scratch/linsk/hbn_test_preprocessed"
 log_path: "/scratch/linsk/hbn_test_log.txt"

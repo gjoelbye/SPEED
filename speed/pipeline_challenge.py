@@ -1,8 +1,10 @@
+from turtle import pd
 import mne
 import numpy as np
 from tqdm import tqdm
 import logging
 from pathlib import Path
+import pandas as pd
 import logging
 # import h5py
 from collections import OrderedDict
@@ -22,7 +24,7 @@ class Pipeline(ABC):
     def __init__(self) -> None:
         super().__init__()
     
-class BasePipeline(Pipeline):
+class BasePipeline(Pipeline): 
     """
     A class for preprocessing EEG data files.
 
@@ -46,15 +48,18 @@ class BasePipeline(Pipeline):
             lp_freq: Optional[float] = 100.0,
             line_freqs: List[float] = [60.0], 
             iclabel_threshold: float = 0.7,
-            quality_check: bool = True,
+            # quality_check: bool = True,
             min_nchans: int = 10, 
             do_ica: bool = True, 
             included_components: List[str] = ["brain", "other"], 
             memory_efficient: bool = True,
             montage_name: str = "tuh",
-            channels: List[str] = None, #['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'],
+            channels: List[str] = None, #aka chs later in script #['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'],
             channels_to_remove: List[str] = None,
-            channels_rename: Optional[Dict[str, str]] = None
+            channels_rename: Optional[Dict[str, str]] = None,
+            metrics_path: Path = None,
+            return_quality_metrics: bool = False,
+            drop_bad_quality: bool = True,
         ):
         
         mne.set_log_level('ERROR')
@@ -65,7 +70,9 @@ class BasePipeline(Pipeline):
         self.sfreq = sfreq
         self.interpolation_mode = "accurate"
         self.ransac = True
-        self.quality_check = quality_check
+        # self.quality_check = quality_check
+        self.return_quality_metrics = return_quality_metrics
+        self.drop_bad_quality = drop_bad_quality
         
         # Quality check thresholds
         self.oha_threshold = 50e-6 #40e-6
@@ -80,10 +87,16 @@ class BasePipeline(Pipeline):
 
         self.min_nchans = min_nchans
         self.window_length = window_length # Seconds 
+
+        self.metrics_path = metrics_path
+        metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
         
     def _setup_montage_and_channels(self, montage_name, chs):
         """Setup montage and channels."""
-        self.chs = chs # TBD info.channels if chs is None?
+        # gib error if channels is none or empty: 
+        if not chs or len(chs) == 0:
+            raise ValueError("Channels must be provided and be in required order.")
+        self.chs = chs # all passed channels in order
         self.montage_name = montage_name
         
         if montage_name is None: 
@@ -126,12 +139,12 @@ class BasePipeline(Pipeline):
     def _average_reference(self, raw: mne.io.Raw):
         return mne.set_eeg_reference(raw, ref_channels='average', projection=False, copy=False, verbose=False)
         
-    def _evaluate_quality(self, raw: mne.io.Raw):
-        if not self.quality_check:
-            return True
-        else:
-            return PreprocessMethods.evaluate_quality(raw, self.oha_threshold, self.thv_threshold, self.chv_threshold, self.min_unique_ratio, 
-                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq)
+    def _evaluate_quality(self, raw: mne.io.Raw, return_raw_numbers: bool = False):
+        # if not self.quality_check:
+        #     return True
+        # else:
+        return PreprocessMethods.evaluate_quality(raw, self.oha_threshold, self.thv_threshold, self.chv_threshold, self.min_unique_ratio,
+                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq, return_raw_numbers=return_raw_numbers)
                     
     def _interpolate_nearest(self, raw: mne.io.Raw):     
         return PreprocessMethods.interpolate_nearest(raw, self.sfreq)
@@ -149,11 +162,16 @@ class BasePipeline(Pipeline):
         return PreprocessMethods.ica_clean(raw, self.iclabel_threshold, self.included_components)       
 
     def _interpolate_missing(self, raw: mne.io.Raw):
-        # self.chs is just the given list of channels?
         return PreprocessMethods.interpolate_missing(raw, self.chs, self.montage, mode=self.interpolation_mode)
     
-    def _drop_extra_and_reorder(self, raw: mne.io.Raw):
-        return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
+    # def _drop_extra_and_reorder(self, raw: mne.io.Raw):
+    #     return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
+
+    def _drop_extra_channels(self, raw: mne.io.Raw):
+        return PreprocessMethods.drop_extra_channels(raw, self.chs)
+    
+    def _reorder_channels(self, raw: mne.io.Raw):
+        return PreprocessMethods.reorder_chans(raw, self.chs)
     
     def _drop_channels_manually(self, raw: mne.io.Raw):
         return PreprocessMethods.drop_channels_manually(raw, self.channels_to_remove)
@@ -241,23 +259,52 @@ class PretrainPipeline(BasePipeline):
     def run_single(self, raw, start_time, end_time, filename) -> Optional[mne.io.Raw]:
         window_info_str = f"File: {filename}.\tTime: {(start_time, end_time)}."
                
-        quality = self._evaluate_quality(raw)
-        # Instead of dropping like below, we want to keep the file but log the quality metrics (from the evaluate_quality function) into a separate file (incl. file name) , same below
-        if not quality:
-            raw = None
-            logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
-            return None
-        
+        if self.return_quality_metrics:
+            quality, (oha1, thv1, chv1, bcr1) = self._evaluate_quality(raw, return_raw_numbers=True)
+            if self.drop_bad_quality:
+                if not quality:
+                    raw = None
+                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
+                    return None
+            return quality, (oha1, thv1, chv1, bcr1)
+        else:
+            if self.drop_bad_quality:
+                quality = self._evaluate_quality(raw, return_raw_numbers=False)
+                if not quality:
+                    raw = None
+                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
+                    return None
+
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        quality = self._evaluate_quality(raw)
-        # same here
-        if not quality:
-            raw = None
-            logging.info(f"{window_info_str}\tQuality check 2 failed. Dropping window.")
-            return None
+        if self.return_quality_metrics:
+            quality, (oha2, thv2, chv2, bcr2) = self._evaluate_quality(raw, return_raw_numbers=True)
+            if self.drop_bad_quality:
+                if not quality:
+                    raw = None
+                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
+                    return None
+            return quality, (oha2, thv2, chv2, bcr2)
+        else:
+            if self.drop_bad_quality:
+                quality = self._evaluate_quality(raw, return_raw_numbers=False)
+                if not quality:
+                    raw = None
+                    logging.info(f"{window_info_str}\tQuality check 2 failed. Dropping window.")
+                    return None
+        
+
+        if self.return_quality_metrics and self.metrics_path is not None:
+            fname = self.metrics_path / "quality_metrics.csv"
+            pd.DataFrame({
+                "filename": [filename],
+                "window_info": [window_info_str],
+                "oha1": [oha1], "thv1": [thv1], "chv1": [chv1], "bcr1": [bcr1],
+                "oha2": [oha2], "thv2": [thv2], "chv2": [chv2], "bcr2": [bcr2],
+            }).to_csv(fname, mode='a', header=not fname.is_file(), index=False)
+
         
         self._filter(raw)    
         self._average_reference(raw)
@@ -274,11 +321,13 @@ class PretrainPipeline(BasePipeline):
         missing_chs = self._interpolate_missing(raw)
         logging.info(f"{window_info_str}\tIntepolating {len(missing_chs)} channels: {missing_chs}.")
         
-        extra_chs = self._drop_extra_and_reorder(raw)
+        # extra_chs = self._drop_extra_and_reorder(raw)
+        extra_chs = self._drop_extra_channels(raw)
         if len(extra_chs) > 0:
             logging.info(f"{window_info_str}\tRemoving {len(extra_chs)} extra channels: {extra_chs}.")
         
-        self._interpolate_nearest(raw)
+        self._reorder_channels(raw)
+        self._interpolate_nearest(raw) # why not normal resampling?
         
         return raw
 

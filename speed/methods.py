@@ -35,6 +35,7 @@ class PreprocessMethods:
                         hp_freq=0.5, 
                         lp_freq=100,
                         # percentile=95
+                        return_raw_numbers=False,
                         ):
         """
         Evaluate EEG recording quality.
@@ -86,10 +87,13 @@ class PreprocessMethods:
         bcr = len(bad_channels) / n_chans
         
         # return (oha < oha_threshold) & (thv < thv_threshold) & (chv < chv_threshold) & (bcr < 0.8)
+        if return_raw_numbers:
+            return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8), (oha, thv, chv, bcr)
         return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8) 
 
 
     def interpolate_nearest(raw, sfreq=256.0):
+        # resampling func
         x = raw._data
 
         old_sfreq = raw.info['sfreq']
@@ -185,6 +189,7 @@ class PreprocessMethods:
         return exclude_idx, labels, y_proba
     
     def interpolate_missing(raw, chs, montage, mode="accurate"):
+ 
         missing_ch = [c for c in chs if c not in raw.ch_names]
         if len(missing_ch) == 0: return missing_ch
         
@@ -202,7 +207,7 @@ class PreprocessMethods:
         raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)
         return missing_ch
     
-    def zero_missing(raw, chs, montage):
+    def zero_missing(raw, chs, montage): # df is this 
         missing_ch = [c for c in chs if c not in raw.ch_names]
         if len(missing_ch) == 0: return missing_ch
         
@@ -215,19 +220,29 @@ class PreprocessMethods:
         raw.set_montage(montage, verbose=False)
         return missing_ch
     
-    def drop_extra_and_reorder(raw, chs):
-        # chs is the 
-        if chs is None:
-            return []
-        else:
-            extra_ch = [c for c in raw.ch_names if c not in chs]
-            raw.drop_channels(extra_ch)
+    # def drop_extra_and_reorder(raw, chs):
+    #     if chs is None:
+    #         return []
+    #     else:
+    #         extra_ch = [c for c in raw.ch_names if c not in chs]
+    #         raw.drop_channels(extra_ch)
             
-            # List of channel order
-            new_ch_order = [ch for ch in chs if ch in raw.ch_names]    
-            raw.reorder_channels(new_ch_order)    
+    #         # List of channel order
+    #         new_ch_order = [ch for ch in chs if ch in raw.ch_names]    
+    #         raw.reorder_channels(new_ch_order)    
             
-            return extra_ch
+    #         return extra_ch
+        
+    def drop_extra_channels(raw, chs):
+        extra_ch = [c for c in raw.ch_names if c not in chs]
+        raw.drop_channels(extra_ch)
+        return extra_ch
+
+
+    def reorder_chans(raw, chs):
+        new_ch_order = [ch for ch in chs if ch in raw.ch_names]    
+        raw.reorder_channels(new_ch_order)    
+        return
         
     def drop_channels_manually(raw, chs_to_remove):
         """Drop specified channels from the raw data."""
