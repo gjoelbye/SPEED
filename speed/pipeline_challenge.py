@@ -75,9 +75,9 @@ class BasePipeline(Pipeline):
         self.drop_bad_quality = drop_bad_quality
         
         # Quality check thresholds
-        self.oha_threshold = 50e-6 #40e-6
-        self.thv_threshold = 50e-6 #40e-6
-        self.chv_threshold = 90e-6 #80e-6
+        self.oha_threshold = 40e-6
+        self.thv_threshold = 40e-6
+        self.chv_threshold = 80e-6
         self.min_unique_ratio=0.001
                             
         self.memory_efficient = memory_efficient        
@@ -258,55 +258,34 @@ class PretrainPipeline(BasePipeline):
         
     def run_single(self, raw, start_time, end_time, filename) -> Optional[mne.io.Raw]:
         window_info_str = f"File: {filename}.\tTime: {(start_time, end_time)}."
-               
-        if self.return_quality_metrics:
-            quality, (oha1, thv1, chv1, bcr1) = self._evaluate_quality(raw, return_raw_numbers=True)
-            if self.drop_bad_quality:
-                if not quality:
-                    raw = None
-                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
-                    return None
-            return quality, (oha1, thv1, chv1, bcr1)
-        else:
-            if self.drop_bad_quality:
-                quality = self._evaluate_quality(raw, return_raw_numbers=False)
-                if not quality:
-                    raw = None
-                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
-                    return None
 
+        # --- First check
+        ok, metrics1 = self._run_quality_check(raw, filename, start_time, end_time, stage=1)
+        if not ok:
+            return None
+
+        # --- Preprocessing
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
+        # --- Second check
+        metrics1 = metrics1 or (None, None, None, None)
+        ok, metrics2 = self._run_quality_check(
+            raw, filename, start_time, end_time, stage=2,
+            oha=metrics1[0], thv=metrics1[1], chv=metrics1[2], bcr=metrics1[3]
+        )
+        if not ok:
+            return None
+
+        # --- Save metrics only if requested
         if self.return_quality_metrics:
-            quality, (oha2, thv2, chv2, bcr2) = self._evaluate_quality(raw, return_raw_numbers=True)
-            if self.drop_bad_quality:
-                if not quality:
-                    raw = None
-                    logging.info(f"{window_info_str}\tQuality check 1 failed. Dropping window.")
-                    return None
-            return quality, (oha2, thv2, chv2, bcr2)
-        else:
-            if self.drop_bad_quality:
-                quality = self._evaluate_quality(raw, return_raw_numbers=False)
-                if not quality:
-                    raw = None
-                    logging.info(f"{window_info_str}\tQuality check 2 failed. Dropping window.")
-                    return None
-        
+            self._save_quality_metrics(filename, start_time, end_time,
+                                    *(metrics1 if metrics1 else (None,)*4),
+                                    *(metrics2 if metrics2 else (None,)*4))
 
-        if self.return_quality_metrics and self.metrics_path is not None:
-            fname = self.metrics_path / "quality_metrics.csv"
-            pd.DataFrame({
-                "filename": [filename],
-                "window_info": [window_info_str],
-                "oha1": [oha1], "thv1": [thv1], "chv1": [chv1], "bcr1": [bcr1],
-                "oha2": [oha2], "thv2": [thv2], "chv2": [chv2], "bcr2": [bcr2],
-            }).to_csv(fname, mode='a', header=not fname.is_file(), index=False)
-
-        
-        self._filter(raw)    
+        # Continue...
+        self._filter(raw)
         self._average_reference(raw)
                 
         if self.do_ica:
@@ -331,7 +310,49 @@ class PretrainPipeline(BasePipeline):
         
         return raw
 
+    def _run_quality_check(
+        self, raw, filename: str, start_time: str, end_time: str, stage: int,
+        oha=None, thv=None, chv=None, bcr=None
+    ):
+        """
+        Run a quality check depending on config.
+        Returns: (quality_ok: bool, metrics: tuple or None)
+        """
+        if not (self.return_quality_metrics or self.drop_bad_quality):
+            return True, None  # skip completely if not needed
 
+        quality, metrics = self._evaluate_quality(raw, return_raw_numbers=self.return_quality_metrics)
+
+        if self.drop_bad_quality and not quality:
+            logging.info(f"File: {filename}.\tTime: {(start_time, end_time)}.\tQuality check {stage} failed. Dropping window.")
+            if self.return_quality_metrics:
+                # Save both stages’ metrics if available
+                self._save_quality_metrics(filename, start_time, end_time,
+                                        oha, thv, chv, bcr,
+                                        *(metrics if metrics else (None,)*4))
+            return False, metrics
+
+        return True, metrics
+
+
+    def _save_quality_metrics(
+        self, filename: str, start_time: str, end_time: str,
+        oha1: float = None, thv1: float = None, chv1: float = None, bcr1: float = None,
+        oha2: float = None, thv2: float = None, chv2: float = None, bcr2: float = None
+    ) -> None:
+        if self.metrics_path is None:
+            return
+        
+        fname = self.metrics_path / "quality_metrics.csv"
+        pd.DataFrame([{
+            "filename": filename,
+            "window_start_time": start_time,
+            "window_end_time": end_time,
+            "oha1": oha1, "thv1": thv1, "chv1": chv1, "bcr1": bcr1,
+            "oha2": oha2, "thv2": thv2, "chv2": chv2, "bcr2": bcr2,
+        }]).to_csv(fname, mode="a", header=not fname.is_file(), index=False)
+
+    
 
 # class HBNFinetuning(BasePipeline):
 #     """ 
