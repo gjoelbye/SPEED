@@ -90,6 +90,7 @@ class PreprocessMethods:
         if return_raw_numbers:
             return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8), (oha, thv, chv, bcr)
         return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8) 
+        # True is good; if all four metrics are below threshold, return True; if at least one is above threshold, return False
 
 
     def interpolate_nearest(raw, sfreq=256.0):
@@ -188,9 +189,10 @@ class PreprocessMethods:
         raw = ica.apply(raw, exclude=exclude_idx, verbose=False)
         return exclude_idx, labels, y_proba
     
-    def interpolate_missing(raw, chs, montage, mode="accurate"):
+    def interpolate_missing(raw, chs, exclude_channels,  montage, mode="accurate"):
  
-        missing_ch = [c for c in chs if c not in raw.ch_names]
+        # missing_ch = [c for c in chs if c not in raw.ch_names] 
+        missing_ch = list(set(chs) - set(raw.ch_names) - set(exclude_channels))
         if len(missing_ch) == 0: return missing_ch
         
         # Adding placeholder missing channels

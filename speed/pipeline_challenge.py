@@ -43,6 +43,7 @@ class BasePipeline(Pipeline):
     def __init__(
             self, 
             window_length: int = 60,
+            shift_seconds: Optional[float] = None,
             sfreq: float = 256.0,
             hp_freq: Optional[float] = 0.5, 
             lp_freq: Optional[float] = 100.0,
@@ -53,7 +54,7 @@ class BasePipeline(Pipeline):
             do_ica: bool = True, 
             included_components: List[str] = ["brain", "other"], 
             memory_efficient: bool = True,
-            montage_name: str = "tuh",
+            montage_name: str = None, #str = "tuh",
             channels: List[str] = None, #aka chs later in script #['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'],
             channels_to_remove: List[str] = None,
             channels_rename: Optional[Dict[str, str]] = None,
@@ -87,6 +88,7 @@ class BasePipeline(Pipeline):
 
         self.min_nchans = min_nchans
         self.window_length = window_length # Seconds 
+        self.shift_seconds = shift_seconds
 
         self.metrics_path = metrics_path
         metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
@@ -128,7 +130,7 @@ class BasePipeline(Pipeline):
         
     # Add typing
     def _split_raw(self, raw: mne.io.Raw):
-        return split_raw(raw, self.window_length)
+        return split_raw(raw, self.window_length, self.shift_seconds)
     
     def _set_montage(self, raw: mne.io.Raw):
         return PreprocessMethods.set_montage(raw, self.montage)
@@ -162,7 +164,7 @@ class BasePipeline(Pipeline):
         return PreprocessMethods.ica_clean(raw, self.iclabel_threshold, self.included_components)       
 
     def _interpolate_missing(self, raw: mne.io.Raw):
-        return PreprocessMethods.interpolate_missing(raw, self.chs, self.montage, mode=self.interpolation_mode)
+        return PreprocessMethods.interpolate_missing(raw, self.chs, self.channels_to_remove, self.montage, mode=self.interpolation_mode)
     
     # def _drop_extra_and_reorder(self, raw: mne.io.Raw):
     #     return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
@@ -219,17 +221,22 @@ class PretrainPipeline(BasePipeline):
                 
                 # Skip if raw_orig is too short
                 if self.window_length is not None:
-                    if raw_orig.times[-1] < 1.5*self.window_length:
+                    if raw_orig.times[-1] < 1.5*self.window_length: # 
                         logging.info(f"File: {src_path.stem}.\tDuration too short. Skipping file.")
                         continue
             except Exception as e:
                 logging.error(f"Dropping file: {src_path.stem}.\tError: {e}")
                 continue
                 
+            if self.window_length is None:
+                raws.append(raw_orig)
+                times.append((raw_orig.times[0], raw_orig.times[-1]))
+                indices.append(i)
+                continue
             raws_split, times_split = self._split_raw(raw_orig)
             raws.extend(raws_split)
             times.extend(times_split)
-            indices.extend([i] * len(raws_split))
+            indices.extend([i] * len(raws_split)) 
             
         total_windows = len(raws)
         logging.debug(f"Total windows: {total_windows}")
@@ -237,7 +244,7 @@ class PretrainPipeline(BasePipeline):
         for i, raw in enumerate(raws):
             start_time = round(times[i][0], 1)
             end_time = round(times[i][1], 1)
-            filename = src_paths[indices[i]].stem            
+            filename = src_paths[indices[i]] #.stem            
             
             try:
                 raws[i] = self.run_single(raw, start_time, end_time, filename)
@@ -259,32 +266,36 @@ class PretrainPipeline(BasePipeline):
     def run_single(self, raw, start_time, end_time, filename) -> Optional[mne.io.Raw]:
         window_info_str = f"File: {filename}.\tTime: {(start_time, end_time)}."
 
-        # --- First check
-        ok, metrics1 = self._run_quality_check(raw, filename, start_time, end_time, stage=1)
+        # --- First quality check
+        ok, metrics1 = self._run_quality_check(raw, window_info_str, stage=1)
         if not ok:
             return None
+
+        metrics1 = metrics1 or (None, None, None, None)
 
         # --- Preprocessing
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        # --- Second check
-        metrics1 = metrics1 or (None, None, None, None)
+        # --- Second quality check
         ok, metrics2 = self._run_quality_check(
-            raw, filename, start_time, end_time, stage=2,
+            raw, window_info_str, stage=2,
             oha=metrics1[0], thv=metrics1[1], chv=metrics1[2], bcr=metrics1[3]
         )
         if not ok:
             return None
 
+        metrics2 = metrics2 or (None, None, None, None)
+
         # --- Save metrics only if requested
         if self.return_quality_metrics:
-            self._save_quality_metrics(filename, start_time, end_time,
-                                    *(metrics1 if metrics1 else (None,)*4),
-                                    *(metrics2 if metrics2 else (None,)*4))
+            self._save_quality_metrics(
+                filename, start_time, end_time,
+                *(metrics1), *(metrics2)
+            )
 
-        # Continue...
+        # --- Continue preprocessing
         self._filter(raw)
         self._average_reference(raw)
                 
@@ -311,12 +322,11 @@ class PretrainPipeline(BasePipeline):
         return raw
 
     def _run_quality_check(
-        self, raw, filename: str, start_time: str, end_time: str, stage: int,
+        self, raw, window_info_str: str, stage: int,
         oha=None, thv=None, chv=None, bcr=None
     ):
         """
-        Run a quality check depending on config.
-        Returns: (quality_ok: bool, metrics: tuple or None)
+        Evaluate quality without saving. Returns: (quality_ok: bool, metrics: tuple or None)
         """
         if not (self.return_quality_metrics or self.drop_bad_quality):
             return True, None  # skip completely if not needed
@@ -324,15 +334,10 @@ class PretrainPipeline(BasePipeline):
         quality, metrics = self._evaluate_quality(raw, return_raw_numbers=self.return_quality_metrics)
 
         if self.drop_bad_quality and not quality:
-            logging.info(f"File: {filename}.\tTime: {(start_time, end_time)}.\tQuality check {stage} failed. Dropping window.")
-            if self.return_quality_metrics:
-                # Save both stages’ metrics if available
-                self._save_quality_metrics(filename, start_time, end_time,
-                                        oha, thv, chv, bcr,
-                                        *(metrics if metrics else (None,)*4))
+            logging.info(f"{window_info_str}.\tQuality check {stage} failed. Dropping window.")
             return False, metrics
 
-        return True, metrics
+        return True, metrics # True even if quality is bad if not dropping bc not used anyways, just need to continue
 
 
     def _save_quality_metrics(

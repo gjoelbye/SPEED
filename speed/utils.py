@@ -81,33 +81,39 @@ def heuristic_resolution(old_type_dict: OrderedDict):
     assert len(new_type_dict) == len(old_type_dict)
     return new_type_dict
 
+
 # ToDo: Transfer annotations
-def split_raw(raw, window_length=60):
+def split_raw(raw, window_length=60, shift_seconds=None):
     sfreq = raw.info['sfreq']  # Sampling frequency
     windows_samples = int(window_length * sfreq)  # Samples per segment
-    
-    windows = []  # List to hold the segmented Raw objects
-    time_slices = []  # List to hold the time slices for each segment
-    start_sample = 0  # Initialize starting sample
 
-    while start_sample < raw.n_times:
+    # Default shift = no overlap
+    if shift_seconds is None:
+        shift_seconds = window_length
+    shift_samples = int(shift_seconds * sfreq)
+
+    windows = []       # List to hold the segmented Raw objects
+    time_slices = []   # List to hold the time slices for each segment
+    start_sample = 0   # Initialize starting sample
+
+    while start_sample + windows_samples <= raw.n_times:
         end_sample = start_sample + windows_samples
-        if end_sample > raw.n_times:
-            break
 
-        # Directly use the raw object's time slice method to get the segment
-        # without copying the entire data set
+        # Slice raw object
         window, times = raw[:, start_sample:end_sample]
-        
-        # Creating a new RawArray object for each segment
-        info = mne.create_info(ch_names=raw.info['ch_names'], sfreq=sfreq, ch_types=raw.get_channel_types())
+
+        # Create RawArray for each segment
+        info = mne.create_info(ch_names=raw.info['ch_names'], 
+                               sfreq=sfreq, 
+                               ch_types=raw.get_channel_types())
         window_raw = mne.io.RawArray(window, info, verbose=False)
         window_raw.set_montage(raw.get_montage())
-        
+
         windows.append(window_raw)
         time_slices.append((times[0], times[-1]))
 
-        start_sample += windows_samples  # Move to the next segment
+        # Advance by shift, not by full window length
+        start_sample += shift_samples 
 
     return windows, time_slices
 
