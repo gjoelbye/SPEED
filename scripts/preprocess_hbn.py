@@ -13,6 +13,8 @@ from speed.pipeline_challenge import Pipeline
 import warnings
 from time import sleep
 from pathlib import Path
+# from mne.export import export_eeglab
+
 
 def configure_logging(filename):
     # Configure logging to file with a specific format
@@ -44,8 +46,11 @@ def preprocess(pipeline: Pipeline, src_paths: list[Path], dest_path: str, conf_l
             file.create_dataset("data", data=np.array([raw._data for raw in raws]), dtype='float32')
     else:
         if len(raws) != 1:
-            raise ValueError(".set output requires exactly one file per call.")  
+            raise ValueError("(not .hdf5 output) requires exactly one file per call.")  
         raws[0].save(dest_path, overwrite=True)
+        # export_eeglab(dest_path, raws[0])
+        # raws[0].export(dest_path, fmt="edf")
+
     logging.debug(f"Saved to {dest_path}. File size: {Path(dest_path).stat().st_size / 1e6:.2f} MB.")            
     
     # Delete the raws to save memory and clean up memory
@@ -56,7 +61,6 @@ def preprocess(pipeline: Pipeline, src_paths: list[Path], dest_path: str, conf_l
 def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log_path: str,
                         overwrite: bool = False, shuffle_files: bool = True, batch_size: int = 10, n_jobs: int = 6, file_extension: str = ".edf", save_as_hdf5 : bool = True):
     
-    ###############
     if os.path.exists(log_path):
         if overwrite:
             raise ValueError("Log file already exists. Please provide a different path.")
@@ -65,7 +69,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
     
     conf_log = lambda: configure_logging(log_path)
     conf_log()
-    ##############  
+       
     if os.path.isdir(dataset_path):
         # src_paths = glob.glob(os.path.join(dataset_path, "**/*.edf"), recursive=True)
         pattern = f"*{file_extension}"
@@ -90,7 +94,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
                 with h5py.File(file_path, "r") as file:
                     processed_files.extend(file.attrs["files"].tolist())
         else:
-            data_files = glob.glob(f"{out_path}/*.set")
+            data_files = glob.glob(f"{out_path}/*.fif")
             processed_files = [Path(f).stem for f in data_files]
         # Remove already processed files
     src_paths = [src for src in src_paths if src.stem not in processed_files]
@@ -102,29 +106,10 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
 
     # Split the EDF files into batches
     if not save_as_hdf5:
-        batch_size = 1  # force one file per batch for .set
+        batch_size = 1  # force one file per batch for .set/.edf/ .fif
     src_paths_batches = [src_paths[i:i + batch_size] for i in range(0, len(src_paths), batch_size)]
-###########################################################################################################
     
     # # Create destination files
-    # des_paths = []
-    
-    # idx = 1
-    # while len(des_paths) < len(src_paths_batches):
-    #     file_name = f"data_{idx}.hdf5"
-    #     if not os.path.exists(os.path.join(out_path, file_name)):
-    #         des_paths.append(Path(os.path.join(out_path, file_name)))
-    #     idx += 1
-    
-    # assert len(des_paths) == len(src_paths_batches), "Number of destination files should be equal to the number of batches"
-    
-    # logging.debug(f"Total files: {len(src_paths)}")
-    # logging.debug(f"Batch size: {batch_size}")
-    # logging.debug(f"Total batches: {len(src_paths_batches)}")
-    # logging.debug(f"Number of jobs: {n_jobs}")
-    
-    # if save_as_hdf5:
-    #     des_paths = [Path(out_path) / f"data_{i+1}.hdf5" for i in range(len(src_paths_batches))]
     if save_as_hdf5:
         des_paths = []
         idx = 1
@@ -134,30 +119,27 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
                 des_paths.append(candidate)
             idx += 1
 
-
-
-###########################################################################################################
-    # _ = Parallel(n_jobs=n_jobs)(delayed(preprocess)(pipeline, src_path_batch, des_path, conf_log) \
-    #     for src_path_batch, des_path in tqdm(zip(src_paths_batches, des_paths),total=len(src_paths_batches), desc='Preprocessing files'))
-
-    # for src_path_batch, des_path in tqdm(zip(src_paths_batches, des_paths), total=len(src_paths_batches), desc='Preprocessing files'):
-    #     preprocess(pipeline, src_path_batch, des_path, conf_log)
-
     processed_count = 0
+    # if save_as_hdf5:
+    #     for src_path_batch, dest_file in zip(src_paths_batches, des_paths):
+    #         preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=True)
+    #         processed_count += len(src_path_batch)
+    #         logging.info(f"Processed {processed_count}/{len(src_paths)} files")
     if save_as_hdf5:
-        for src_path_batch, dest_file in zip(src_paths_batches, des_paths):
+        for src_path_batch, dest_file in tqdm(zip(src_paths_batches, des_paths), total=len(des_paths), desc="Batches"):
             preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=True)
             processed_count += len(src_path_batch)
-            logging.info(f"Processed {processed_count}/{len(src_paths)} files")
+            tqdm.write(f"Processed {processed_count}/{len(src_paths)} files")
+
     else:
         for src_path_batch in src_paths_batches:
-            dest_file = Path(out_path) / f"{src_path_batch[0].stem}.set"
+            dest_file = Path(out_path) / f"{src_path_batch[0].stem}.fif"
             preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=False)
             processed_count += len(src_path_batch)
             logging.info(f"Processed {processed_count}/{len(src_paths)} files")
 
 
-
 if __name__ == "__main__":
     mne.set_log_level("CRITICAL")
     CLI(preprocess_dataset)
+    

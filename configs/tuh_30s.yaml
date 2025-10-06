@@ -7,7 +7,7 @@ pipeline:
     hp_freq: 0.5
     lp_freq: 50
     window_length: 30
-    shift_seconds: 15
+    shift_seconds: # None
     metrics_path: "/data/linsk/hbn_preprocessed/logs/"
     return_quality_metrics: True
     drop_bad_quality: True
@@ -19,7 +19,7 @@ log_path: "/data/linsk/hbn_preprocessed/logs/hbn_log.txt"
 file_extension: ".set" # RestingState_eeg - run ALL HBN
 overwrite: False
 shuffle_files: True
-batch_size: 10
+batch_size: 2
 n_jobs: 1
 save_as_hdf5: True 
-# nohup python scripts/preprocess_hbn.py --config configs/hbn.yaml > /data/linsk/hbn_preprocessed/logs/nohup.out 2>&1 &
+# nohup python scripts/preprocess_hbn.py --config configs/tuh_30s.yaml > /data/linsk/hbn_preprocessed/logs/nohup.out 2>&1 &

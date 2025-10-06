@@ -268,10 +268,13 @@ class PretrainPipeline(BasePipeline):
 
         # --- First quality check
         ok, metrics1 = self._run_quality_check(raw, window_info_str, stage=1)
-        if not ok:
-            return None
-
         metrics1 = metrics1 or (None, None, None, None)
+        if not ok:
+            if self.return_quality_metrics:
+                self._save_quality_metrics(
+                    filename, start_time, end_time,
+                    *(metrics1), None, None, None, None)
+            return None
 
         # --- Preprocessing
         self._remove_line_noise(raw)
@@ -279,14 +282,15 @@ class PretrainPipeline(BasePipeline):
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
         # --- Second quality check
-        ok, metrics2 = self._run_quality_check(
-            raw, window_info_str, stage=2,
-            oha=metrics1[0], thv=metrics1[1], chv=metrics1[2], bcr=metrics1[3]
-        )
-        if not ok:
-            return None
-
+        ok, metrics2 = self._run_quality_check(raw, window_info_str, stage=2)
         metrics2 = metrics2 or (None, None, None, None)
+        if not ok:
+            if self.return_quality_metrics:
+                self._save_quality_metrics(
+                    filename, start_time, end_time,
+                    *(metrics1), *(metrics2)  # stage 2 metrics are empty
+        )
+            return None
 
         # --- Save metrics only if requested
         if self.return_quality_metrics:
@@ -322,11 +326,10 @@ class PretrainPipeline(BasePipeline):
         return raw
 
     def _run_quality_check(
-        self, raw, window_info_str: str, stage: int,
-        oha=None, thv=None, chv=None, bcr=None
+        self, raw, window_info_str: str, stage: int
     ):
         """
-        Evaluate quality without saving. Returns: (quality_ok: bool, metrics: tuple or None)
+        Evaluate quality. Returns: (quality_ok: bool, metrics: tuple or None)
         """
         if not (self.return_quality_metrics or self.drop_bad_quality):
             return True, None  # skip completely if not needed
