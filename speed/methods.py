@@ -88,7 +88,7 @@ class PreprocessMethods:
         
         # return (oha < oha_threshold) & (thv < thv_threshold) & (chv < chv_threshold) & (bcr < 0.8)
         if return_raw_numbers:
-            return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8), (oha, thv, chv, bcr)
+            return (oha < 0.8) & (thv < 0.8) & (chv < 0.5) & (bcr < 0.8), (oha, thv, chv, bcr) # change back to 0.5 thv
         return (oha < 0.8) & (thv < 0.5) & (chv < 0.5) & (bcr < 0.8) 
         # True is good; if all four metrics are below threshold, return True; if at least one is above threshold, return False
 

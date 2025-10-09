@@ -19,7 +19,7 @@ from pathlib import Path
 def configure_logging(filename):
     # Configure logging to file with a specific format
     logging.basicConfig(filename=filename,
-                        level=logging.DEBUG,
+                        level=logging.INFO,
                         format='%(asctime)s - %(levelname)s - [%(processName)s] -\t%(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S',  # Added to format timestamp without milliseconds
                         force=True)
@@ -125,24 +125,45 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
                 des_paths.append(candidate)
             idx += 1
 
-    processed_count = 0
+    # processed_count = 0
     # if save_as_hdf5:
-    #     for src_path_batch, dest_file in zip(src_paths_batches, des_paths):
+    #     for src_path_batch, dest_file in tqdm(zip(src_paths_batches, des_paths), total=len(des_paths), desc="Batches"):
     #         preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=True)
     #         processed_count += len(src_path_batch)
-    #         logging.info(f"Processed {processed_count}/{len(src_paths)} files")
-    if save_as_hdf5:
-        for src_path_batch, dest_file in tqdm(zip(src_paths_batches, des_paths), total=len(des_paths), desc="Batches"):
-            preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=True)
-            processed_count += len(src_path_batch)
-            tqdm.write(f"Processed {processed_count}/{len(src_paths)} files")
+    #         tqdm.write(f"Processed {processed_count}/{len(src_paths)} files")
 
+    # else:
+    #     for src_path_batch in src_paths_batches:
+    #         dest_file = Path(out_path) / f"{src_path_batch[0].stem}.edf"
+    #         preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=False)
+    #         processed_count += len(src_path_batch)
+    #         logging.info(f"Processed {processed_count}/{len(src_paths)} files")
+
+
+    # --- Prepare jobs ---
+    if save_as_hdf5:
+        jobs = [
+            delayed(preprocess)(pipeline, src_batch, dest_file, conf_log, save_as_hdf5=True)
+            for src_batch, dest_file in zip(src_paths_batches, des_paths)
+        ]
     else:
-        for src_path_batch in src_paths_batches:
-            dest_file = Path(out_path) / f"{src_path_batch[0].stem}.edf"
-            preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=False)
-            processed_count += len(src_path_batch)
-            logging.info(f"Processed {processed_count}/{len(src_paths)} files")
+        jobs = [
+            delayed(preprocess)(
+                pipeline,
+                src_batch,
+                Path(out_path) / f"{src_batch[0].stem}.edf",
+                conf_log,
+                save_as_hdf5=False
+            )
+            for src_batch in src_paths_batches
+        ]
+
+    # --- Run jobs in parallel ---
+    results = Parallel(n_jobs=n_jobs)(
+        tqdm(jobs, total=len(jobs), desc="Batches", smoothing=0.05)
+    )
+
+    print(f"Completed {len(results)} / {len(jobs)} batches.")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from datetime import datetime
 from time import sleep
 from speed.utils import split_raw, make_tuh_montage
 from speed.methods import PreprocessMethods
+from filelock import FileLock
 
 # Import typing
 from typing import Tuple, List, Optional, Dict
@@ -358,13 +359,15 @@ class PretrainPipeline(BasePipeline):
             return
         
         fname = self.metrics_path / "quality_metrics.csv"
-        pd.DataFrame([{
-            "filename": filename,
-            "window_start_time": start_time,
-            "window_end_time": end_time,
-            "oha1": oha1, "thv1": thv1, "chv1": chv1, "bcr1": bcr1,
+        lock = FileLock(str(fname) + ".lock")
+        with lock:
+            pd.DataFrame([{
+                "filename": filename,
+                "window_start_time": start_time,
+                "window_end_time": end_time,
+                "oha1": oha1, "thv1": thv1, "chv1": chv1, "bcr1": bcr1,
             "oha2": oha2, "thv2": thv2, "chv2": chv2, "bcr2": bcr2,
-        }]).to_csv(fname, mode="a", header=not fname.is_file(), index=False)
+            }]).to_csv(fname, mode="a", header=not fname.is_file(), index=False)
 
     
 
