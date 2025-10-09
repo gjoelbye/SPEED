@@ -100,14 +100,14 @@ def split_raw(raw, window_length=60, shift_seconds=None):
         end_sample = start_sample + windows_samples
 
         # Slice raw object
-        window, times = raw[:, start_sample:end_sample]
+        window, times = raw[:, start_sample:end_sample] 
 
         # Create RawArray for each segment
         info = mne.create_info(ch_names=raw.info['ch_names'], 
                                sfreq=sfreq, 
                                ch_types=raw.get_channel_types())
         window_raw = mne.io.RawArray(window, info, verbose=False)
-        window_raw.set_montage(raw.get_montage())
+        window_raw.set_montage(raw.get_montage()) # how does this work if raw_get_montage is None? - all good - does nothing. 
 
         windows.append(window_raw)
         time_slices.append((times[0], times[-1]))

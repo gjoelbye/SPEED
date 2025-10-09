@@ -221,7 +221,7 @@ class PretrainPipeline(BasePipeline):
                 
                 # Skip if raw_orig is too short
                 if self.window_length is not None:
-                    if raw_orig.times[-1] < 1.5*self.window_length: # 
+                    if raw_orig.times[-1] < 1.5*self.window_length:
                         logging.info(f"File: {src_path.stem}.\tDuration too short. Skipping file.")
                         continue
             except Exception as e:
@@ -233,7 +233,12 @@ class PretrainPipeline(BasePipeline):
                 times.append((raw_orig.times[0], raw_orig.times[-1]))
                 indices.append(i)
                 continue
+
             raws_split, times_split = self._split_raw(raw_orig)
+            if self.montage_name is None:
+                for r in raws_split:
+                    r._original_info = raw_orig.info.copy()     
+                          
             raws.extend(raws_split)
             times.extend(times_split)
             indices.extend([i] * len(raws_split)) 
@@ -244,8 +249,7 @@ class PretrainPipeline(BasePipeline):
         for i, raw in enumerate(raws):
             start_time = round(times[i][0], 1)
             end_time = round(times[i][1], 1)
-            filename = src_paths[indices[i]] #.stem            
-            
+            filename = src_paths[indices[i]] #.stem  
             try:
                 raws[i] = self.run_single(raw, start_time, end_time, filename)
             except Exception as e:
@@ -281,16 +285,18 @@ class PretrainPipeline(BasePipeline):
         bad_chs = self._drop_bad_channels(raw)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        # --- Second quality check
-        ok, metrics2 = self._run_quality_check(raw, window_info_str, stage=2)
-        metrics2 = metrics2 or (None, None, None, None)
-        if not ok:
-            if self.return_quality_metrics:
-                self._save_quality_metrics(
-                    filename, start_time, end_time,
-                    *(metrics1), *(metrics2)  # stage 2 metrics are empty
-        )
-            return None
+        # # --- Second quality check
+        # ok, metrics2 = self._run_quality_check(raw, window_info_str, stage=2)
+        # metrics2 = metrics2 or (None, None, None, None)
+        # if not ok:
+        #     if self.return_quality_metrics:
+        #         self._save_quality_metrics(
+        #             filename, start_time, end_time,
+        #             *(metrics1), *(metrics2)  # stage 2 metrics are empty
+        # )
+        #     return None
+        metrics2 = (None, None, None, None)
+
 
         # --- Save metrics only if requested
         if self.return_quality_metrics:

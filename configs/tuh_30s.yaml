@@ -8,7 +8,7 @@ pipeline:
     lp_freq: 50
     window_length: 30
     shift_seconds: # None
-    metrics_path: "/data/linsk/hbn_preprocessed/logs/"
+    metrics_path: "/data/linsk/hbn_preprocessed/logs/quality_metrics.csv"
     return_quality_metrics: True
     drop_bad_quality: True
     channels_to_remove: ['E48', 'E49', 'E56', 'E63', 'E68', 'E73', 'E81', 'E88', 'E94', 'E99', 'E107', 'E113', 'E119', 'E1', 'E8', 'E14', 'E17', 'E21', 'E25', 'E32', 'E125', 'E126', 'E127', 'E128']

@@ -192,18 +192,35 @@ class PreprocessMethods:
     def interpolate_missing(raw, chs, exclude_channels,  montage, mode="accurate"):
  
         # missing_ch = [c for c in chs if c not in raw.ch_names] 
-        missing_ch = list(set(chs) - set(raw.ch_names) - set(exclude_channels))
+        missing_ch = list(set(chs) - set(raw.ch_names) - set(exclude_channels)) # total - present - excluded = missing
         if len(missing_ch) == 0: return missing_ch
         
         # Adding placeholder missing channels
-        new_channel_data = np.nan * np.zeros((len(missing_ch), raw._data.shape[1]))
-        new_channel_info = mne.create_info(missing_ch, sfreq=raw.info['sfreq'], ch_types='eeg')
-        raw.add_channels([mne.io.RawArray(new_channel_data, new_channel_info, verbose=False)], force_update_info=True)
-        raw.info['bads'] = missing_ch
+        new_channel_data = np.nan * np.zeros((len(missing_ch), raw._data.shape[1])) # nan signal
+        new_channel_info = mne.create_info(missing_ch, sfreq=raw.info['sfreq'], ch_types='eeg') # create info object for all missing ch
+        raw.add_channels([mne.io.RawArray(new_channel_data, new_channel_info, verbose=False)], force_update_info=True) # add all missing ch to raw
+
+
+        
+        raw.info['bads'] = missing_ch # mark them as bad for interpolation
+        print(f'missing in interpolation: {missing_ch}')
         
         # Setting montage for added channels
         if montage is not None: # Go over this again, bc maybe needed for HBN as well???
-            raw.set_montage(montage, verbose=False)
+            raw.set_montage(montage, verbose=False) # set montage to have chan loc for new bad channels
+        else: # hbn doesnt have that so need to provide chanlocs from the original raw data 
+            if hasattr(raw, "_original_info"):
+                orig_info = raw._original_info
+                for ch_name in missing_ch:
+                    if ch_name in orig_info["ch_names"]:
+                        src_idx = orig_info["ch_names"].index(ch_name)
+                        dst_idx = raw.ch_names.index(ch_name)
+                        raw.info["chs"][dst_idx]["loc"] = orig_info["chs"][src_idx]["loc"].copy()
+                    else:
+                        print(f"Warning: no loc info for {ch_name} in original data.")
+            else:
+                print("Warning: no _original_info found — cannot copy locs for missing channels.")
+
 
         # Built-in intepolation
         raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)

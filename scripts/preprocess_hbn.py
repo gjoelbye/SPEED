@@ -47,9 +47,15 @@ def preprocess(pipeline: Pipeline, src_paths: list[Path], dest_path: str, conf_l
     else:
         if len(raws) != 1:
             raise ValueError("(not .hdf5 output) requires exactly one file per call.")  
-        raws[0].save(dest_path, overwrite=True)
+        # raws[0].save(dest_path, overwrite=True)
         # export_eeglab(dest_path, raws[0])
-        # raws[0].export(dest_path, fmt="edf")
+        ########################################################
+        data = raws[0].get_data()  
+        for i, ch_name in enumerate(raws[0].ch_names):
+            n_nans = np.isnan(data[i]).sum()
+            if n_nans > 0:
+                print(f"Channel {ch_name} has {n_nans} NaNs")
+        raws[0].export(dest_path, fmt="edf")
 
     logging.debug(f"Saved to {dest_path}. File size: {Path(dest_path).stat().st_size / 1e6:.2f} MB.")            
     
@@ -94,7 +100,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
                 with h5py.File(file_path, "r") as file:
                     processed_files.extend(file.attrs["files"].tolist())
         else:
-            data_files = glob.glob(f"{out_path}/*.fif")
+            data_files = glob.glob(f"{out_path}/*.edf")
             processed_files = [Path(f).stem for f in data_files]
         # Remove already processed files
     src_paths = [src for src in src_paths if src.stem not in processed_files]
@@ -106,7 +112,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
 
     # Split the EDF files into batches
     if not save_as_hdf5:
-        batch_size = 1  # force one file per batch for .set/.edf/ .fif
+        batch_size = 1  # force one file per batch for .set/.edf/ .edf
     src_paths_batches = [src_paths[i:i + batch_size] for i in range(0, len(src_paths), batch_size)]
     
     # # Create destination files
@@ -133,7 +139,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
 
     else:
         for src_path_batch in src_paths_batches:
-            dest_file = Path(out_path) / f"{src_path_batch[0].stem}.fif"
+            dest_file = Path(out_path) / f"{src_path_batch[0].stem}.edf"
             preprocess(pipeline, src_path_batch, dest_file, conf_log, save_as_hdf5=False)
             processed_count += len(src_path_batch)
             logging.info(f"Processed {processed_count}/{len(src_paths)} files")
