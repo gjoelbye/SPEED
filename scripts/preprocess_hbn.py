@@ -13,7 +13,90 @@ from speed.pipeline_challenge import Pipeline
 import warnings
 from time import sleep
 from pathlib import Path
+import pyedflib
+from pyedflib import FILETYPE_BDFPLUS
+from datetime import datetime
 # from mne.export import export_eeglab
+
+def write_bdf_from_raw(raw: mne.io.BaseRaw, out_path: str, write_annotations: bool = True):
+    # pick channels
+    picks = mne.pick_types(
+        raw.info,
+        eeg=True, eog=True, ecg=True, emg=True, misc=True, stim=True,
+        seeg=True, dbs=True, ecog=True, resp=True, bio=True, exci=True, ias=True, syst=True
+    )
+    if len(picks) == 0:
+        raise RuntimeError("No writable channels were found.")
+
+    # data in volts, then to microvolts
+    data_v = raw.get_data(picks).astype(np.float64)    # (n_ch, n_samp)
+    data_uv = data_v * 1e6
+    ch_names = [raw.ch_names[i] for i in picks]
+    sfreq = float(raw.info["sfreq"])
+
+    # helper to round limits so their string fits 8 characters
+    def round_to_edf8(x: float) -> float:
+        s = "-" if x < 0 else ""
+        int_digits = len(str(int(abs(x))))
+        max_decimals = max(0, 7 - len(s) - int_digits)
+        if max_decimals == 0:
+            return float(f"{int(x)}")
+        return float(f"{x:.{max_decimals}f}")
+
+    # compute limits with margin
+    MARGIN_PCT = 0.01
+    pmins = data_uv.min(axis=1)
+    pmaxs = data_uv.max(axis=1)
+    spans = np.maximum(pmaxs - pmins, 1.0)  # at least 1 uV span before rounding
+    pmins = pmins - MARGIN_PCT * spans
+    pmaxs = pmaxs + MARGIN_PCT * spans
+
+    # round for shorter strings
+    pmins = np.array([round_to_edf8(v) for v in pmins], dtype=float)
+    pmaxs = np.array([round_to_edf8(v) for v in pmaxs], dtype=float)
+
+    # SAFETY: ensure min < max after rounding
+    # if equal or invalid, enforce a symmetric default window
+    DEFAULT_WINDOW_UV = 1.0
+    for i in range(len(pmins)):
+        if not np.isfinite(pmins[i]) or not np.isfinite(pmaxs[i]) or pmaxs[i] <= pmins[i]:
+            pmins[i] = -DEFAULT_WINDOW_UV
+            pmaxs[i] = +DEFAULT_WINDOW_UV
+
+    # build headers
+    sig_headers = []
+    for name, pmin, pmax in zip(ch_names, pmins, pmaxs):
+        sig_headers.append({
+            "label": name[:16],
+            "dimension": "uV",
+            "sample_frequency": sfreq,
+            "physical_min": float(pmin),
+            "physical_max": float(pmax),
+            "digital_min": -8388608,   # 24 bit BDF
+            "digital_max":  8388607
+        })
+
+    # start time
+    md = raw.info.get("meas_date")
+    if md is not None and isinstance(md, (tuple, list)):
+        md = md[0]
+    startdate = md.replace(tzinfo=None) if md is not None else datetime.now()
+
+    # write BDF+
+    f = pyedflib.EdfWriter(str(out_path), n_channels=len(sig_headers), file_type=FILETYPE_BDFPLUS)
+    f.setSignalHeaders(sig_headers)
+    f.setStartdatetime(startdate)
+
+    # write all channels in one call
+    f.writeSamples([data_uv[i] for i in range(len(sig_headers))])
+
+    # annotations
+    if write_annotations and len(raw.annotations) > 0:
+        first_time = float(raw.first_time)
+        for onset, duration, desc in zip(raw.annotations.onset, raw.annotations.duration, raw.annotations.description):
+            f.writeAnnotation(float(onset + first_time), float(duration), str(desc))
+
+    f.close()
 
 
 def configure_logging(filename):
@@ -50,12 +133,14 @@ def preprocess(pipeline: Pipeline, src_paths: list[Path], dest_path: str, conf_l
         # raws[0].save(dest_path, overwrite=True)
         # export_eeglab(dest_path, raws[0])
         ########################################################
-        data = raws[0].get_data()  
-        for i, ch_name in enumerate(raws[0].ch_names):
-            n_nans = np.isnan(data[i]).sum()
-            if n_nans > 0:
-                print(f"Channel {ch_name} has {n_nans} NaNs")
-        raws[0].export(dest_path, fmt="edf")
+        # data = raws[0].get_data()  
+        # for i, ch_name in enumerate(raws[0].ch_names):
+        #     n_nans = np.isnan(data[i]).sum()
+        #     if n_nans > 0:
+        #         print(f"Channel {ch_name} has {n_nans} NaNs")
+        #raws[0].export(dest_path, fmt="edf")
+        dest_path = str(dest_path)
+        write_bdf_from_raw(raws[0], dest_path.replace(".edf", ".bdf"))
 
     logging.debug(f"Saved to {dest_path}. File size: {Path(dest_path).stat().st_size / 1e6:.2f} MB.")            
     
@@ -151,7 +236,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
             delayed(preprocess)(
                 pipeline,
                 src_batch,
-                Path(out_path) / f"{src_batch[0].stem}.edf",
+                Path(out_path) / f"{src_batch[0].stem}.bdf",
                 conf_log,
                 save_as_hdf5=False
             )

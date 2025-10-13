@@ -13,6 +13,7 @@ from time import sleep
 from speed.utils import split_raw, make_tuh_montage
 from speed.methods import PreprocessMethods
 from filelock import FileLock
+import warnings
 
 # Import typing
 from typing import Tuple, List, Optional, Dict
@@ -202,7 +203,13 @@ class PretrainPipeline(BasePipeline):
                 if src_path.suffix == ".edf":
                     raw_orig = mne.io.read_raw_edf(src_path, preload=True, verbose=False)
                 elif src_path.suffix == ".set":
-                    raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message=r".*'boundary' events.*",
+                            category=RuntimeWarning,
+                        )
+                        raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
                 else:
                     raise ValueError(f"Unsupported file type: {src_path.suffix}")
 
@@ -233,6 +240,7 @@ class PretrainPipeline(BasePipeline):
                 raws.append(raw_orig)
                 times.append((raw_orig.times[0], raw_orig.times[-1]))
                 indices.append(i)
+                raw_orig._original_info = raw_orig.info.copy()
                 continue
 
             raws_split, times_split = self._split_raw(raw_orig)
