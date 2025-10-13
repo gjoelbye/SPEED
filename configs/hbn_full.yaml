@@ -6,20 +6,20 @@ pipeline:
     sfreq: 100
     hp_freq: 0.5
     lp_freq: 50
-    window_length:
-    shift_seconds:
-    metrics_path: "/home/linsk/temp_prep/logs/quality_metrics.csv"
+    window_length: NULL
+    shift_seconds: NULL
+    metrics_path: "/scratch/agjma/HBN_EEG_Processed_Full/logs/quality_metrics.csv"
     return_quality_metrics: True
     drop_bad_quality: False
     channels_to_remove: ['E48', 'E49', 'E56', 'E63', 'E68', 'E73', 'E81', 'E88', 'E94', 'E99', 'E107', 'E113', 'E119', 'E1', 'E8', 'E14', 'E17', 'E21', 'E25', 'E32', 'E125', 'E126', 'E127', 'E128']
     channels: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E15', 'E16', 'E17', 'E18', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24', 'E25', 'E26', 'E27', 'E28', 'E29', 'E30', 'E31', 'E32', 'E33', 'E34', 'E35', 'E36', 'E37', 'E38', 'E39', 'E40', 'E41', 'E42', 'E43', 'E44', 'E45', 'E46', 'E47', 'E48', 'E49', 'E50', 'E51', 'E52', 'E53', 'E54', 'E55', 'E56', 'E57', 'E58', 'E59', 'E60', 'E61', 'E62', 'E63', 'E64', 'E65', 'E66', 'E67', 'E68', 'E69', 'E70', 'E71', 'E72', 'E73', 'E74', 'E75', 'E76', 'E77', 'E78', 'E79', 'E80', 'E81', 'E82', 'E83', 'E84', 'E85', 'E86', 'E87', 'E88', 'E89', 'E90', 'E91', 'E92', 'E93', 'E94', 'E95', 'E96', 'E97', 'E98', 'E99', 'E100', 'E101', 'E102', 'E103', 'E104', 'E105', 'E106', 'E107', 'E108', 'E109', 'E110', 'E111', 'E112', 'E113', 'E114', 'E115', 'E116', 'E117', 'E118', 'E119', 'E120', 'E121', 'E122', 'E123', 'E124', 'E125', 'E126', 'E127', 'E128', 'Cz']
-dataset_path: "/home/linsk/temp_data/" #"/data/agjma/HBN_EEG_Raw/"
-out_path: "/home/linsk/temp_prep/"
-log_path: "/home/linsk/temp_prep/logs/hbn_log.txt"
-file_extension: "RestingState_eeg.set" # 
+dataset_path: "/nobackup/tsal-tmp/HBN_EEG"
+out_path: "/scratch/agjma/HBN_EEG_Processed_Full/"
+log_path: "/scratch/agjma/HBN_EEG_Processed_Full/logs/hbn_log.txt"
+file_extension: "*.set" # 
 overwrite: False
-shuffle_files: True
+shuffle_files: False
 batch_size: 1
-n_jobs: 1
+n_jobs: -1
 save_as_hdf5: False 
 # nohup python scripts/preprocess_hbn.py --config configs/hbn_full.yaml > /home/linsk/temp_prep/logs/nohup.out 2>&1 &
