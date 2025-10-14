@@ -114,6 +114,7 @@ def preprocess_dataset(pipeline: Pipeline, dataset_path: str, out_path: str, log
     if not save_as_hdf5:
         batch_size = 1  # force one file per batch for .set/.edf/ .edf
     src_paths_batches = [src_paths[i:i + batch_size] for i in range(0, len(src_paths), batch_size)]
+    print(f"Num batches {len(src_paths_batches)}")
     
     # # Create destination files
     if save_as_hdf5:

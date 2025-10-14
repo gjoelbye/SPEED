@@ -16,6 +16,8 @@ from filelock import FileLock
 
 # Import typing
 from typing import Tuple, List, Optional, Dict
+import traceback
+
 
 # Make ABC abstract class
 from abc import ABC, abstractmethod
@@ -142,12 +144,12 @@ class BasePipeline(Pipeline):
     def _average_reference(self, raw: mne.io.Raw):
         return mne.set_eeg_reference(raw, ref_channels='average', projection=False, copy=False, verbose=False)
         
-    def _evaluate_quality(self, raw: mne.io.Raw, return_raw_numbers: bool = False):
+    def _evaluate_quality(self, raw: mne.io.Raw):
         # if not self.quality_check:
         #     return True
         # else:
         return PreprocessMethods.evaluate_quality(raw, self.oha_threshold, self.thv_threshold, self.chv_threshold, self.min_unique_ratio,
-                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq, return_raw_numbers=return_raw_numbers)
+                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq)
                     
     def _interpolate_nearest(self, raw: mne.io.Raw):     
         return PreprocessMethods.interpolate_nearest(raw, self.sfreq)
@@ -215,8 +217,11 @@ class PretrainPipeline(BasePipeline):
                 if self.channels_rename is not None:
                     raw_orig.rename_channels(self.channels_rename)
                     logging.info(f"File: {src_paths[i].stem}.\tRenamed channels: {self.channels_rename}.")
-                    
+
+                if self.montage_name == "tuh":
                     self._to_standard_names(raw_orig)
+                    
+                if self.montage_name is not None:
                     drop_chs = self._set_montage(raw_orig)
                     logging.info(f"File: {src_paths[i].stem}.\tDropped {len(drop_chs)} channels when setting montage: {drop_chs}.")
                 
@@ -254,7 +259,7 @@ class PretrainPipeline(BasePipeline):
             try:
                 raws[i] = self.run_single(raw, start_time, end_time, filename)
             except Exception as e:
-                logging.error(f"File: {filename}.\tTime: {(start_time, end_time)}.\tError: {e}")
+                logging.error(f"File: {filename}.\tTime: {(start_time, end_time)}.\tError: {e}\nTraceback:\n{traceback.format_exc()}") # {e}")
                 raws[i] = None
                 
             # Log progress every N windows
@@ -341,7 +346,7 @@ class PretrainPipeline(BasePipeline):
         if not (self.return_quality_metrics or self.drop_bad_quality):
             return True, None  # skip completely if not needed
 
-        quality, metrics = self._evaluate_quality(raw, return_raw_numbers=self.return_quality_metrics)
+        quality, metrics = self._evaluate_quality(raw)
 
         if self.drop_bad_quality and not quality:
             logging.info(f"{window_info_str}.\tQuality check {stage} failed. Dropping window.")

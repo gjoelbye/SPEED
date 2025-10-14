@@ -3,23 +3,25 @@ pipeline:
   init_args:
     do_ica: False
     line_freqs: [60]
+    channels_rename: # None?
+    montage_name: "tuh"
     sfreq: 100
     hp_freq: 0.5
     lp_freq: 50
     window_length: 30
     shift_seconds: # None
-    metrics_path: "/data/linsk/hbn_preprocessed/logs/quality_metrics.csv"
+    metrics_path: "/scratch/linsk/tuh_test_preprocessed/logs/"
     return_quality_metrics: True
     drop_bad_quality: True
-    channels_to_remove: 
+    channels_to_remove: #None
     channels: ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
-dataset_path: "/data/agjma/HBN_EEG_Raw/"
-out_path: "/data/linsk/hbn_preprocessed"
-log_path: "/data/linsk/hbn_preprocessed/logs/hbn_log.txt"
-file_extension: ".set" # RestingState_eeg - run ALL HBN
+dataset_path: "/scratch/linsk/tuh_test/"
+out_path: "/scratch/linsk/tuh_test_preprocessed/"
+log_path: "/scratch/linsk/tuh_test_preprocessed/logs/log.txt"
+file_extension: ".edf"
 overwrite: False
 shuffle_files: True
-batch_size: 2
+batch_size: 1
 n_jobs: 1
 save_as_hdf5: True 
-# nohup python scripts/preprocess_hbn.py --config configs/tuh_30s.yaml > /data/linsk/hbn_preprocessed/logs/nohup.out 2>&1 &
+# python scripts/preprocess_hbn.py --config configs/tuh_test_30s.yaml
