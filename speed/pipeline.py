@@ -52,7 +52,7 @@ class BasePipeline(Pipeline):
             included_components: List[str] = ["brain", "other"], 
             memory_efficient: bool = True,
             montage_name: str = "tuh",
-            channels: List[str] = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'],
+            channels: List[str] = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4',  'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2'],
             channels_rename: Optional[Dict[str, str]] = None
         ):
         

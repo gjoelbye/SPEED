@@ -189,7 +189,7 @@ class PreprocessMethods:
         raw = ica.apply(raw, exclude=exclude_idx, verbose=False)
         return exclude_idx, labels, y_proba
     
-    # def interpolate_missing(raw, chs, exclude_channels,  montage, mode="accurate"):
+    # def interpolate_missing(raw, chs, exclude_channels, montage, mode="accurate"):
  
     #     # missing_ch = [c for c in chs if c not in raw.ch_names] 
     #     exclude_channels = exclude_channels or []
@@ -227,7 +227,8 @@ class PreprocessMethods:
     #     raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)
     #     return missing_ch
 
-    def interpolate_missing(raw, chs, exclude_channels,  montage, mode="accurate"):
+    def interpolate_missing(raw, chs, exclude_channels, montage, mode="accurate"):
+ 
 
         # missing_ch = [c for c in chs if c not in raw.ch_names] 
         exclude_channels = exclude_channels or []
@@ -239,10 +240,7 @@ class PreprocessMethods:
         new_channel_info = mne.create_info(missing_ch, sfreq=raw.info['sfreq'], ch_types='eeg') # create info object for all missing ch
         raw.add_channels([mne.io.RawArray(new_channel_data, new_channel_info, verbose=False)], force_update_info=True) # add all missing ch to raw
 
-
-        
         raw.info['bads'] = missing_ch # mark them as bad for interpolation
-        print(f'missing in interpolation: {missing_ch}')
         
         # Setting montage for added channels
         if montage is not None:
@@ -260,9 +258,9 @@ class PreprocessMethods:
             else:
                 print("Warning: no _original_info found — cannot copy locs for missing channels.")
 
-
-        # Built-in intepolation
+        # Built-in intepolation        
         raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)
+
         return missing_ch
     
     def zero_missing(raw, chs, montage): # df is this 
