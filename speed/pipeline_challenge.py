@@ -65,6 +65,7 @@ class BasePipeline(Pipeline):
             metrics_path: Path = None,
             return_quality_metrics: bool = False,
             drop_bad_quality: bool = True,
+            fit_to_hbn_montage: bool = True,
         ):
         
         mne.set_log_level('ERROR')
@@ -78,6 +79,7 @@ class BasePipeline(Pipeline):
         # self.quality_check = quality_check
         self.return_quality_metrics = return_quality_metrics
         self.drop_bad_quality = drop_bad_quality
+        self.fit_to_hbn_montage = fit_to_hbn_montage
         
         # Quality check thresholds
         self.oha_threshold = 40e-6
@@ -335,8 +337,7 @@ class PretrainPipeline(BasePipeline):
             bad_chs = self._drop_bad_channels(raw)
             logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        to_hbn_montage = True ################################################################################################# fix later 
-        if to_hbn_montage: 
+        if self.fit_to_hbn_montage: 
             raw = self._interpolate_to_hbn(raw)
         else:
             missing_chs = self._interpolate_missing(raw)

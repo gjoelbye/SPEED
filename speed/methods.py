@@ -228,12 +228,8 @@ class PreprocessMethods:
         return missing_ch
 
     def interpolate_to_hbn(raw):
-        print(f"before {len(raw.info['ch_names'])}")
-        hbn_montage = mne.channels.read_dig_fif('montage-hbn-dig.fif') # adjust to access from anywhere? 
-        # tuh montage is set
+        hbn_montage = mne.channels.read_dig_fif('montage-hbn19-dig.fif') # adjust to access from anywhere? 
         raw = raw.interpolate_to(sensors=hbn_montage, method='spline') # not inplace??
-        print(f"after {len(raw.info['ch_names'])}")
-        # optionally now pick 19 channels
         return raw
     
     def zero_missing(raw, chs, montage): # df is this 
