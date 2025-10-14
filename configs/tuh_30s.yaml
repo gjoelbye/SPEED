@@ -16,7 +16,7 @@ pipeline:
 dataset_path: "/data/agjma/HBN_EEG_Raw/"
 out_path: "/data/linsk/hbn_preprocessed"
 log_path: "/data/linsk/hbn_preprocessed/logs/hbn_log.txt"
-file_extension: ".set" # RestingState_eeg - run ALL HBN
+file_extension: ".edf" # RestingState_eeg - run ALL HBN
 overwrite: False
 shuffle_files: True
 batch_size: 2
