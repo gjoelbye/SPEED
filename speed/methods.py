@@ -222,14 +222,14 @@ class PreprocessMethods:
             else:
                 print("Warning: no _original_info found — cannot copy locs for missing channels.")
 
-
+        # zero out missing channels
         # Built-in intepolation
         raw.interpolate_bads(reset_bads=True, mode=mode, verbose=False)
         return missing_ch
 
     def interpolate_to_hbn(raw):
-        hbn_montage = mne.channels.read_dig_fif('montage-hbn19-dig.fif') # adjust to access from anywhere? 
-        raw = raw.interpolate_to(sensors=hbn_montage, method='spline') # not inplace??
+        hbn_montage = mne.channels.read_dig_fif('montage-hbn19-dig.fif')
+        raw = raw.interpolate_to(sensors=hbn_montage, method='spline')
         return raw
     
     def zero_missing(raw, chs, montage): # df is this 

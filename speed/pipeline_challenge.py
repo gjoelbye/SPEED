@@ -65,7 +65,7 @@ class BasePipeline(Pipeline):
             metrics_path: Path = None,
             return_quality_metrics: bool = False,
             drop_bad_quality: bool = True,
-            fit_to_hbn_montage: bool = True,
+            fit_to_hbn_montage: bool = False,
         ):
         
         mne.set_log_level('ERROR')
@@ -337,7 +337,8 @@ class PretrainPipeline(BasePipeline):
             bad_chs = self._drop_bad_channels(raw)
             logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        if self.fit_to_hbn_montage: 
+        logging.info(f"{window_info_str}\tFitting to HBN montage: {self.fit_to_hbn_montage}.")
+        if self.fit_to_hbn_montage:
             raw = self._interpolate_to_hbn(raw)
         else:
             missing_chs = self._interpolate_missing(raw)
