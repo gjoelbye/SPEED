@@ -12,9 +12,12 @@ from time import sleep
 from speed.utils import split_raw, make_tuh_montage
 from speed.methods import PreprocessMethods
 from filelock import FileLock
+import warnings
 
 # Import typing
 from typing import Tuple, List, Optional, Dict
+import traceback
+
 
 # Make ABC abstract class
 from abc import ABC, abstractmethod
@@ -61,6 +64,7 @@ class BasePipeline(Pipeline):
             metrics_path: Path = None,
             return_quality_metrics: bool = False,
             drop_bad_quality: bool = True,
+            fit_to_hbn_montage: bool = False,
         ):
         
         mne.set_log_level('ERROR')
@@ -74,6 +78,7 @@ class BasePipeline(Pipeline):
         # self.quality_check = quality_check
         self.return_quality_metrics = return_quality_metrics
         self.drop_bad_quality = drop_bad_quality
+        self.fit_to_hbn_montage = fit_to_hbn_montage
         
         # Quality check thresholds
         self.oha_threshold = 40e-6
@@ -141,12 +146,12 @@ class BasePipeline(Pipeline):
     def _average_reference(self, raw: mne.io.Raw):
         return mne.set_eeg_reference(raw, ref_channels='average', projection=False, copy=False, verbose=False)
         
-    def _evaluate_quality(self, raw: mne.io.Raw, return_raw_numbers: bool = False):
+    def _evaluate_quality(self, raw: mne.io.Raw):
         # if not self.quality_check:
         #     return True
         # else:
         return PreprocessMethods.evaluate_quality(raw, self.oha_threshold, self.thv_threshold, self.chv_threshold, self.min_unique_ratio,
-                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq, return_raw_numbers=return_raw_numbers)
+                              self.min_nchans, self.line_freqs, self.hp_freq, self.lp_freq)
                     
     def _interpolate_nearest(self, raw: mne.io.Raw):     
         return PreprocessMethods.interpolate_nearest(raw, self.sfreq)
@@ -165,6 +170,9 @@ class BasePipeline(Pipeline):
 
     def _interpolate_missing(self, raw: mne.io.Raw):
         return PreprocessMethods.interpolate_missing(raw, self.chs, self.channels_to_remove, self.montage, mode=self.interpolation_mode)
+    
+    def _interpolate_to_hbn(self, raw: mne.io.Raw):
+        return PreprocessMethods.interpolate_to_hbn(raw)
     
     # def _drop_extra_and_reorder(self, raw: mne.io.Raw):
     #     return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
@@ -201,7 +209,13 @@ class PretrainPipeline(BasePipeline):
                 if src_path.suffix == ".edf":
                     raw_orig = mne.io.read_raw_edf(src_path, preload=True, verbose=False)
                 elif src_path.suffix == ".set":
-                    raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message=r".*'boundary' events.*",
+                            category=RuntimeWarning,
+                        )
+                        raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
                 else:
                     raise ValueError(f"Unsupported file type: {src_path.suffix}")
 
@@ -214,8 +228,11 @@ class PretrainPipeline(BasePipeline):
                 if self.channels_rename is not None:
                     raw_orig.rename_channels(self.channels_rename)
                     logging.info(f"File: {src_paths[i].stem}.\tRenamed channels: {self.channels_rename}.")
-                    
+
+                if self.montage_name == "tuh":
                     self._to_standard_names(raw_orig)
+                    
+                if self.montage_name is not None:
                     drop_chs = self._set_montage(raw_orig)
                     logging.info(f"File: {src_paths[i].stem}.\tDropped {len(drop_chs)} channels when setting montage: {drop_chs}.")
                 
@@ -232,6 +249,7 @@ class PretrainPipeline(BasePipeline):
                 raws.append(raw_orig)
                 times.append((raw_orig.times[0], raw_orig.times[-1]))
                 indices.append(i)
+                raw_orig._original_info = raw_orig.info.copy()
                 continue
 
             raws_split, times_split = self._split_raw(raw_orig)
@@ -253,7 +271,7 @@ class PretrainPipeline(BasePipeline):
             try:
                 raws[i] = self.run_single(raw, start_time, end_time, filename)
             except Exception as e:
-                logging.error(f"File: {filename}.\tTime: {(start_time, end_time)}.\tError: {e}")
+                logging.error(f"File: {filename}.\tTime: {(start_time, end_time)}.\tError: {e}\nTraceback:\n{traceback.format_exc()}") # {e}")
                 raws[i] = None
                 
             # Log progress every N windows
@@ -318,15 +336,17 @@ class PretrainPipeline(BasePipeline):
             bad_chs = self._drop_bad_channels(raw)
             logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
-        missing_chs = self._interpolate_missing(raw)
-        logging.info(f"{window_info_str}\tIntepolating {len(missing_chs)} channels: {missing_chs}.")
+        logging.info(f"{window_info_str}\tFitting to HBN montage: {self.fit_to_hbn_montage}.")
+        if self.fit_to_hbn_montage:
+            raw = self._interpolate_to_hbn(raw)
+        else:
+            missing_chs = self._interpolate_missing(raw)
+            logging.info(f"{window_info_str}\tIntepolating {len(missing_chs)} channels: {missing_chs}.")
+            extra_chs = self._drop_extra_channels(raw)
+            if len(extra_chs) > 0:
+                logging.info(f"{window_info_str}\tRemoving {len(extra_chs)} extra channels: {extra_chs}.")
+            self._reorder_channels(raw)
         
-        # extra_chs = self._drop_extra_and_reorder(raw)
-        extra_chs = self._drop_extra_channels(raw)
-        if len(extra_chs) > 0:
-            logging.info(f"{window_info_str}\tRemoving {len(extra_chs)} extra channels: {extra_chs}.")
-        
-        self._reorder_channels(raw)
         self._interpolate_nearest(raw) # why not normal resampling?
         
         return raw
@@ -340,7 +360,7 @@ class PretrainPipeline(BasePipeline):
         if not (self.return_quality_metrics or self.drop_bad_quality):
             return True, None  # skip completely if not needed
 
-        quality, metrics = self._evaluate_quality(raw, return_raw_numbers=self.return_quality_metrics)
+        quality, metrics = self._evaluate_quality(raw)
 
         if self.drop_bad_quality and not quality:
             logging.info(f"{window_info_str}.\tQuality check {stage} failed. Dropping window.")
@@ -367,73 +387,3 @@ class PretrainPipeline(BasePipeline):
                 "oha1": oha1, "thv1": thv1, "chv1": chv1, "bcr1": bcr1,
             "oha2": oha2, "thv2": thv2, "chv2": chv2, "bcr2": bcr2,
             }]).to_csv(fname, mode="a", header=not fname.is_file(), index=False)
-
-    
-
-# class HBNFinetuning(BasePipeline):
-#     """ 
-#     Copy the whole process from note books ie splitting, annotating etc.
-
-#     Bad channel detection
-#     Avg reference at the end after dropping bad channels
-#     No ICA, montage setting
-#     On full recording
-#       """
-#     def __init__(self, **kwargs):
-#         super().__init__(**kwargs)
-    
-#     def __call__(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
-#         return self.run(src_paths)    
-
-#     def run(self, src_paths):
-#         logging.debug("Loading EDF files...")
-#         src_paths = [Path(src_path) for src_path in src_paths]
-
-#         raws = []
-#         times = []
-#         indices = []
-
-
-# class HBNInference(BasePipeline):
-#     """
-#     Input: tensor, not mne raw object
-#     same as finetuning but for 2s windows (GIVEN)
-#     less extensive bad channel detection
-    
-#     """
-#     def __init__(self, **kwargs):
-#         super().__init__(**kwargs)
-    
-#     def __call__(self): #-> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
-#         # 1. fix output type, add input type and args
-#         return self.run()    
-
-#     def run(self):
-#         # 3. adjust all where 'raw' bc tensor input; add and fix output type and args
-#         # input already filtered to 0.5-50 Hz range and downsampled to 100 Hz
-
-#         # no renaming
-#         # no montage setting
-#         # no skipping
-#         # no splitting, no loop through windows
-
-#         try: 
-#             # 1. adjust to do simple bad channel detection
-#             # 2. fix interpolation/ montage setting
-            
-#             # no quality assesment bc not gonna drop anyway
-#             # no Zapline bc 50*2 not < 100  = 200/2 nyquist
-#             # no detrending
-
-#             bad_chs = self._drop_bad_channels(raw) # change this to simpler/ less 
-#             logging.info(f"Found {len(bad_chs)} bad channels: {bad_chs}.")
-#             self._average_reference(raw)
-#             missing_chs = self._interpolate_missing(raw) # maybe change this bc do i need to set montage for interpolated channels or can i work around that? 
-#             logging.info(f"Intepolating {len(missing_chs)} channels: {missing_chs}.")
-#         except Exception as e:
-#             logging.error(f"Error during preprocessing: {e}")
-#             raw = None
-#             return raw
-        
-#         return raw
-

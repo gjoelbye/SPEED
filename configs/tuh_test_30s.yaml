@@ -3,22 +3,25 @@ pipeline:
   init_args:
     do_ica: False
     line_freqs: [60]
+    channels_rename: # None?
+    montage_name: "tuh"
     sfreq: 100
     hp_freq: 0.5
     lp_freq: 50
     window_length: 30
     shift_seconds: # None
-    metrics_path: "/scratch/linsk/tuh_preprocessed/logs/"
+    metrics_path: "/scratch/linsk/tuh_test_preprocessed/logs/"
     return_quality_metrics: True
     drop_bad_quality: True
-    channels_to_remove: # None
+    channels_to_remove: #None
     channels: ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
-dataset_path: "/dtu-compute/EEG_at_scale/tuh_eeg/data/tuh_eeg/v2.0.0/edf"
-out_path: "/scratch/linsk/tuh_preprocessed"
-log_path: "/scratch/linsk/tuh_preprocessed/logs/log.txt"
-file_extension: ".edf" 
+dataset_path: "/scratch/linsk/tuh_test/"
+out_path: "/scratch/linsk/tuh_test_preprocessed/"
+log_path: "/scratch/linsk/tuh_test_preprocessed/logs/log.txt"
+file_extension: ".edf"
 overwrite: False
 shuffle_files: True
-batch_size: 10
-n_jobs: 8
+batch_size: 1
+n_jobs: 1
 save_as_hdf5: True 
+# python scripts/preprocess_hbn.py --config configs/tuh_test_30s.yaml
