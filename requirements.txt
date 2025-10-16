@@ -7,3 +7,5 @@ braindecode >= 0.7
 pytorch-lightning >= 2.1.0
 jsonargparse >= 4.24.0
 wandb >= 0.15.12
+mne-icalabel
+pyprep
