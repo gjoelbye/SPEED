@@ -11,6 +11,9 @@ from torch.nn.functional import interpolate
 from torch import tensor
 from speed.utils import create_channel_type_dict, heuristic_resolution
 
+import warnings
+warnings.simplefilter(action='ignore', category=RuntimeWarning)
+
 class PreprocessMethods:
     def to_standard_names(raw):
         channel_type_dict = create_channel_type_dict(raw)
@@ -200,11 +203,8 @@ class PreprocessMethods:
         new_channel_data = np.nan * np.zeros((len(missing_ch), raw._data.shape[1])) # nan signal
         new_channel_info = mne.create_info(missing_ch, sfreq=raw.info['sfreq'], ch_types='eeg') # create info object for all missing ch
         raw.add_channels([mne.io.RawArray(new_channel_data, new_channel_info, verbose=False)], force_update_info=True) # add all missing ch to raw
-
-
         
         raw.info['bads'] = missing_ch # mark them as bad for interpolation
-        print(f'missing in interpolation: {missing_ch}')
         
         # Setting montage for added channels
         if montage is not None:
@@ -228,7 +228,7 @@ class PreprocessMethods:
         return missing_ch
 
     def interpolate_to_hbn(raw):
-        hbn_montage = mne.channels.read_dig_fif('montage-hbn19-dig.fif')
+        hbn_montage = mne.channels.read_dig_fif('/users/madsenan/SPEED/montage-hbn19-dig.fif')
         raw = raw.interpolate_to(sensors=hbn_montage, method='spline')
         return raw
     
