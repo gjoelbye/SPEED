@@ -113,6 +113,7 @@ def preprocess(pipeline: Pipeline, src_paths: list[Path], dest_path: str, conf_l
     conf_log()    
     warnings.simplefilter(action='ignore', category=FutureWarning)
     warnings.simplefilter(action='ignore', category=ModuleNotFoundError)
+    warnings.filterwarnings("ignore", message=r".*pymatreader cannot import Matlab string variables.*", category=UserWarning)
     
     logging.debug("Starting preprocessing...")    
     raws, times, indices = pipeline(src_paths)

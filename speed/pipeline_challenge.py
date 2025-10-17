@@ -66,6 +66,7 @@ class BasePipeline(Pipeline):
             return_quality_metrics: bool = False,
             drop_bad_quality: bool = True,
             fit_to_hbn_montage: bool = False,
+            fit_to_hbn_montage_path: Path = '/home/agjma/SPEED/montage-hbn19-dig.fif'
         ):
         
         mne.set_log_level('ERROR')
@@ -99,7 +100,7 @@ class BasePipeline(Pipeline):
         self.metrics_path = metrics_path
         metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
 
-        self.hbn_montage = mne.channels.read_dig_fif('/users/madsenan/SPEED/montage-hbn19-dig.fif')
+        self.hbn_montage = mne.channels.read_dig_fif(fit_to_hbn_montage_path)
         assert self.hbn_montage is not None, "HBN montage not found."
         
     def _setup_montage_and_channels(self, montage_name, chs):
@@ -219,6 +220,11 @@ class PretrainPipeline(BasePipeline):
                             message=r".*'boundary' events.*",
                             category=RuntimeWarning,
                         )
+                        warnings.filterwarnings(
+                            "ignore",
+                            message=r".*pymatreader cannot import Matlab string variables.*",
+                            category=UserWarning,
+                        )
                         raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
                 else:
                     raise ValueError(f"Unsupported file type: {src_path.suffix}")
@@ -305,6 +311,7 @@ class PretrainPipeline(BasePipeline):
         # --- Preprocessing
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
+        print(bad_chs)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
         # # --- Second quality check
