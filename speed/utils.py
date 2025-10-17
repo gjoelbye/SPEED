@@ -88,7 +88,7 @@ def split_raw(raw, window_length=60, shift_seconds=None):
     windows_samples = int(window_length * sfreq)  # Samples per segment
 
     # Default shift = no overlap
-    if shift_seconds is None:
+    if shift_seconds is None or shift_seconds == 0:
         shift_seconds = window_length
     shift_samples = int(shift_seconds * sfreq)
 
