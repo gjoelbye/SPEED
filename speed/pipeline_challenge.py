@@ -1,4 +1,3 @@
-from turtle import pd
 import mne
 import numpy as np
 from tqdm import tqdm
