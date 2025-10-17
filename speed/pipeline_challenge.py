@@ -65,6 +65,7 @@ class BasePipeline(Pipeline):
             return_quality_metrics: bool = False,
             drop_bad_quality: bool = True,
             fit_to_hbn_montage: bool = False,
+            fit_to_hbn_montage_path: Path = '/home/agjma/SPEED/montage-hbn19-dig.fif'
         ):
         
         mne.set_log_level('ERROR')
@@ -98,7 +99,7 @@ class BasePipeline(Pipeline):
         self.metrics_path = metrics_path
         metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
 
-        self.hbn_montage = mne.channels.read_dig_fif('/home/agjma/SPEED/montage-hbn19-dig.fif')
+        self.hbn_montage = mne.channels.read_dig_fif(fit_to_hbn_montage_path)
         assert self.hbn_montage is not None, "HBN montage not found."
         
     def _setup_montage_and_channels(self, montage_name, chs):
