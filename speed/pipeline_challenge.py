@@ -98,6 +98,9 @@ class BasePipeline(Pipeline):
 
         self.metrics_path = metrics_path
         metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
+
+        self.hbn_montage = mne.channels.read_dig_fif('/home/agjma/SPEED/montage-hbn19-dig.fif')
+        assert self.hbn_montage is not None, "HBN montage not found."
         
     def _setup_montage_and_channels(self, montage_name, chs):
         """Setup montage and channels."""
@@ -173,7 +176,8 @@ class BasePipeline(Pipeline):
         return PreprocessMethods.interpolate_missing(raw, self.chs, self.channels_to_remove, self.montage, mode=self.interpolation_mode)
     
     def _interpolate_to_hbn(self, raw: mne.io.Raw):
-        return PreprocessMethods.interpolate_to_hbn(raw)
+        print(raw.info['dig'])
+        return PreprocessMethods.interpolate_to_hbn(raw, self.hbn_montage)
     
     # def _drop_extra_and_reorder(self, raw: mne.io.Raw):
     #     return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
@@ -215,6 +219,11 @@ class PretrainPipeline(BasePipeline):
                             "ignore",
                             message=r".*'boundary' events.*",
                             category=RuntimeWarning,
+                        )
+                        warnings.filterwarnings(
+                            "ignore",
+                            message=r".*pymatreader cannot import Matlab string variables.*",
+                            category=UserWarning,
                         )
                         raw_orig = mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
                 else:
@@ -302,6 +311,7 @@ class PretrainPipeline(BasePipeline):
         # --- Preprocessing
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
+        print(bad_chs)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
         # # --- Second quality check
