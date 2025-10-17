@@ -1,3 +1,4 @@
+from turtle import pd
 import mne
 import numpy as np
 from tqdm import tqdm
@@ -97,6 +98,9 @@ class BasePipeline(Pipeline):
 
         self.metrics_path = metrics_path
         metrics_path.mkdir(exist_ok=True, parents=True) if metrics_path is not None else None
+
+        self.hbn_montage = mne.channels.read_dig_fif('/users/madsenan/SPEED/montage-hbn19-dig.fif')
+        assert self.hbn_montage is not None, "HBN montage not found."
         
     def _setup_montage_and_channels(self, montage_name, chs):
         """Setup montage and channels."""
@@ -172,7 +176,7 @@ class BasePipeline(Pipeline):
         return PreprocessMethods.interpolate_missing(raw, self.chs, self.channels_to_remove, self.montage, mode=self.interpolation_mode)
     
     def _interpolate_to_hbn(self, raw: mne.io.Raw):
-        return PreprocessMethods.interpolate_to_hbn(raw)
+        return PreprocessMethods.interpolate_to_hbn(raw, self.hbn_montage)
     
     # def _drop_extra_and_reorder(self, raw: mne.io.Raw):
     #     return PreprocessMethods.drop_extra_and_reorder(raw, self.chs)
