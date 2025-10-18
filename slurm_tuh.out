@@ -1,0 +1,68 @@
+Num batches 69652
+Batches:   0%|          | 0/69652 [00:00<?, ?it/s]Batches:   0%|          | 64/69652 [00:07<2:18:09,  8.39it/s]Batches:   0%|          | 96/69652 [00:56<11:42:16,  1.65it/s]/users/madsenan/speed/lib/python3.11/site-packages/joblib/externals/loky/process_executor.py:782: UserWarning: A worker stopped while some jobs were given to the executor. This can be caused by a too short worker timeout or by a memory leak.
+  warnings.warn(
+Batches:   0%|          | 128/69652 [01:37<15:05:12,  1.28it/s]Batches:   0%|          | 160/69652 [02:29<18:40:36,  1.03it/s]Batches:   0%|          | 192/69652 [03:15<20:21:11,  1.05s/it]Batches:   0%|          | 224/69652 [03:56<21:04:24,  1.09s/it]Batches:   0%|          | 256/69652 [04:57<23:22:21,  1.21s/it]Batches:   0%|          | 288/69652 [05:53<24:46:28,  1.29s/it]Batches:   0%|          | 320/69652 [07:11<27:29:10,  1.43s/it]Batches:   1%|          | 352/69652 [08:24<29:22:25,  1.53s/it]Batches:   1%|          | 384/69652 [10:14<33:21:44,  1.73s/it]Batches:   1%|          | 416/69652 [11:48<35:43:48,  1.86s/it]Batches:   1%|          | 448/69652 [14:10<40:32:52,  2.11s/it]Batches:   1%|          | 480/69652 [16:02<43:01:52,  2.24s/it]Batches:   1%|          | 512/69652 [17:26<43:39:59,  2.27s/it]Batches:   1%|          | 544/69652 [18:57<44:32:46,  2.32s/it]Batches:   1%|          | 576/69652 [20:59<46:54:27,  2.44s/it]Batches:   1%|          | 608/69652 [22:20<47:02:34,  2.45s/it]Batches:   1%|          | 640/69652 [23:46<47:22:30,  2.47s/it]Batches:   1%|          | 672/69652 [24:44<46:22:12,  2.42s/it]Batches:   1%|          | 704/69652 [26:03<46:25:42,  2.42s/it]Batches:   1%|          | 736/69652 [27:34<46:58:03,  2.45s/it]Batches:   1%|          | 768/69652 [29:19<48:04:30,  2.51s/it]Batches:   1%|          | 800/69652 [30:25<47:26:45,  2.48s/it]Batches:   1%|          | 832/69652 [31:26<46:41:10,  2.44s/it]Batches:   1%|          | 864/69652 [32:34<46:16:08,  2.42s/it]Batches:   1%|▏         | 896/69652 [33:54<46:20:36,  2.43s/it]Batches:   1%|▏         | 928/69652 [34:49<45:27:11,  2.38s/it]Batches:   1%|▏         | 960/69652 [36:04<45:23:46,  2.38s/it]Batches:   1%|▏         | 992/69652 [37:25<45:32:24,  2.39s/it]Batches:   1%|▏         | 1024/69652 [38:50<45:51:23,  2.41s/it]Batches:   2%|▏         | 1056/69652 [39:59<45:32:53,  2.39s/it]Batches:   2%|▏         | 1088/69652 [41:28<45:58:00,  2.41s/it]Batches:   2%|▏         | 1120/69652 [43:16<47:02:18,  2.47s/it]Batches:   2%|▏         | 1152/69652 [44:31<46:51:15,  2.46s/it]Batches:   2%|▏         | 1184/69652 [46:02<47:15:27,  2.48s/it]Batches:   2%|▏         | 1216/69652 [47:55<48:24:28,  2.55s/it]Batches:   2%|▏         | 1248/69652 [49:13<48:15:09,  2.54s/it]Batches:   2%|▏         | 1280/69652 [51:01<49:10:02,  2.59s/it]Batches:   2%|▏         | 1312/69652 [53:00<50:20:59,  2.65s/it]Batches:   2%|▏         | 1344/69652 [54:55<51:20:53,  2.71s/it]Batches:   2%|▏         | 1376/69652 [56:35<51:46:43,  2.73s/it]Batches:   2%|▏         | 1408/69652 [58:13<52:06:18,  2.75s/it]Batches:   2%|▏         | 1440/69652 [59:17<51:17:17,  2.71s/it]Batches:   2%|▏         | 1472/69652 [1:00:31<50:51:33,  2.69s/it]Batches:   2%|▏         | 1504/69652 [1:01:25<49:46:48,  2.63s/it]Batches:   2%|▏         | 1536/69652 [1:02:23<48:55:19,  2.59s/it]Batches:   2%|▏         | 1568/69652 [1:03:27<48:17:08,  2.55s/it]Batches:   2%|▏         | 1600/69652 [1:04:36<47:50:54,  2.53s/it]Batches:   2%|▏         | 1632/69652 [1:05:39<47:16:18,  2.50s/it]Batches:   2%|▏         | 1664/69652 [1:06:32<46:22:32,  2.46s/it]Batches:   2%|▏         | 1696/69652 [1:07:25<45:34:05,  2.41s/it]Batches:   2%|▏         | 1728/69652 [1:08:45<45:36:31,  2.42s/it]Batches:   3%|▎         | 1760/69652 [1:10:14<45:58:36,  2.44s/it]Batches:   3%|▎         | 1792/69652 [1:11:28<45:48:58,  2.43s/it]Batches:   3%|▎         | 1824/69652 [1:12:54<46:03:08,  2.44s/it]Batches:   3%|▎         | 1856/69652 [1:14:25<46:25:38,  2.47s/it]Batches:   3%|▎         | 1888/69652 [1:15:25<45:49:04,  2.43s/it]Batches:   3%|▎         | 1920/69652 [1:17:06<46:30:11,  2.47s/it]Batches:   3%|▎         | 1952/69652 [1:19:30<48:28:54,  2.58s/it]Batches:   3%|▎         | 1984/69652 [1:21:51<50:14:36,  2.67s/it]Batches:   3%|▎         | 2016/69652 [1:23:47<51:09:04,  2.72s/it]Batches:   3%|▎         | 2048/69652 [1:25:37<51:50:13,  2.76s/it]Batches:   3%|▎         | 2080/69652 [1:29:12<55:38:52,  2.96s/it]joblib.externals.loky.process_executor._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/externals/loky/process_executor.py", line 490, in _process_worker
+    r = call_item()
+        ^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/externals/loky/process_executor.py", line 291, in __call__
+    return self.fn(*self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 607, in __call__
+    return [func(*args, **kwargs) for func, args, kwargs in self.items]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 607, in <listcomp>
+    return [func(*args, **kwargs) for func, args, kwargs in self.items]
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/pfs/lustrep3/users/madsenan/SPEED/scripts/preprocess_hbn.py", line 129, in preprocess
+    file.attrs['time_slices'] = times
+    ~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "h5py/_objects.pyx", line 56, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 57, in h5py._objects.with_phil.wrapper
+  File "/users/madsenan/speed/lib/python3.11/site-packages/h5py/_hl/attrs.py", line 104, in __setitem__
+    self.create(name, data=value)
+  File "/users/madsenan/speed/lib/python3.11/site-packages/h5py/_hl/attrs.py", line 202, in create
+    attr = h5a.create(self._id, name, htype, space)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "h5py/_objects.pyx", line 56, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 57, in h5py._objects.with_phil.wrapper
+  File "h5py/h5a.pyx", line 50, in h5py.h5a.create
+OSError: Unable to synchronously create attribute (object header message is too large)
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/pfs/lustrep3/users/madsenan/SPEED/scripts/preprocess_hbn.py", line 258, in <module>
+    CLI(preprocess_dataset)
+  File "/users/madsenan/speed/lib/python3.11/site-packages/jsonargparse/_cli.py", line 27, in CLI
+    return auto_cli(*args, _stacklevel=3, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/jsonargparse/_cli.py", line 106, in auto_cli
+    return _run_component(components, init)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/jsonargparse/_cli.py", line 227, in _run_component
+    return component(**cfg)
+           ^^^^^^^^^^^^^^^^
+  File "/pfs/lustrep3/users/madsenan/SPEED/scripts/preprocess_hbn.py", line 249, in preprocess_dataset
+    results = Parallel(n_jobs=n_jobs)(
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 2072, in __call__
+    return output if self.return_generator else list(output)
+                                                ^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 1682, in _get_outputs
+    yield from self._retrieve()
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 1784, in _retrieve
+    self._raise_error_fast()
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 1859, in _raise_error_fast
+    error_job.get_result(self.timeout)
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 758, in get_result
+    return self._return_or_raise()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/users/madsenan/speed/lib/python3.11/site-packages/joblib/parallel.py", line 773, in _return_or_raise
+    raise self._result
+OSError: Unable to synchronously create attribute (object header message is too large)
+srun: error: nid001005: task 0: Exited with exit code 1
+srun: Terminating StepId=13643693.0

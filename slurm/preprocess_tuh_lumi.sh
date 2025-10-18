@@ -5,7 +5,7 @@
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=32
 #SBATCH --exclusive
 #SBATCH --mem=0                   # use all memory on the node
 #SBATCH --time=24:00:00

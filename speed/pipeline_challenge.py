@@ -1,4 +1,3 @@
-from turtle import pd
 import mne
 import numpy as np
 from tqdm import tqdm
@@ -311,7 +310,6 @@ class PretrainPipeline(BasePipeline):
         # --- Preprocessing
         self._remove_line_noise(raw)
         bad_chs = self._drop_bad_channels(raw)
-        print(bad_chs)
         logging.info(f"{window_info_str}\tFound {len(bad_chs)} bad channels: {bad_chs}.")
 
         # # --- Second quality check
