@@ -1,0 +1,28 @@
+pipeline:
+  class_path: speed.pipeline_challenge.PretrainPipeline
+  init_args:
+    do_ica: False
+    line_freqs: [60]
+    sfreq: 100
+    hp_freq: 0.5
+    lp_freq: 50
+    window_length: 30
+    shift_seconds: 15
+    metrics_path: "/scratch/agjma/TUH_EEG_Processed/B/logs/"
+    return_quality_metrics: True
+    drop_bad_quality: True
+    channels_to_remove: Null
+    channels: ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
+    fit_to_hbn_montage: True
+    montage_name: "tuh"
+    fit_to_hbn_montage_path: "/home/agjma/SPEED/montage-hbn19-dig.fif"
+dataset_path: "/dtu-compute/EEG_at_scale/tuh_eeg/data/tuh_eeg/v2.0.0/edf"
+out_path: "/scratch/agjma/TUH_EEG_Processed/B/"
+log_path: "/scratch/agjma/TUH_EEG_Processed/B/logs/log.txt"
+file_extension: Null
+list_file: "/home/agjma/SPEED/tuh_list_2.txt"
+overwrite: False
+shuffle_files: True
+batch_size: 1
+n_jobs: 8
+save_as_hdf5: True 

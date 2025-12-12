@@ -1,11 +1,21 @@
-# base stuff
+# base
 torch >= 2.1.0
+numpy >= 1.24
+pandas >= 2.0
+mne >= 1.5
+mne-icalabel
+pyprep
 moabb >= 0.5.0
 braindecode >= 0.7
 
-# for training
-pytorch-lightning >= 2.1.0
+# preprocessing I/O
+h5py >= 3.9
+pyedflib >= 0.1.30   # for BDF export
+
+tqdm >= 4.66
+joblib >= 1.3
 jsonargparse >= 4.24.0
+
+# training / logging
+pytorch-lightning >= 2.1.0
 wandb >= 0.15.12
-mne-icalabel
-pyprep
