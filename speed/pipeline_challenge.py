@@ -176,7 +176,6 @@ class BasePipeline(Pipeline):
         return PreprocessMethods.interpolate_missing(raw, self.chs, self.channels_to_remove, self.montage, mode=self.interpolation_mode)
     
     def _interpolate_to_hbn(self, raw: mne.io.Raw):
-        print(raw.info['dig'])
         return PreprocessMethods.interpolate_to_hbn(raw, self.hbn_montage)
     
     # def _drop_extra_and_reorder(self, raw: mne.io.Raw):

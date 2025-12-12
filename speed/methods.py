@@ -228,7 +228,6 @@ class PreprocessMethods:
         return missing_ch
 
     def interpolate_to_hbn(raw, hbn_montage):
-        print(raw.info['dig'])
         raw = raw.interpolate_to(sensors=hbn_montage, method='spline')
         return raw
     
