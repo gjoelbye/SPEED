@@ -1,13 +1,3 @@
-# Unified EEG Preprocessing Configuration
-# ========================================
-#
-# Usage:
-#   python scripts/preprocess_unified.py --config configs/example_unified.yaml
-#
-# Override values via command line:
-#   python scripts/preprocess_unified.py --config configs/example_unified.yaml --n_jobs 4
-#
-
 # =============================================================================
 # Pipeline Configuration
 # =============================================================================

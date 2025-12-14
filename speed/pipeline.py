@@ -1,9 +1,3 @@
-"""
-Unified EEG preprocessing pipeline.
-
-A configurable, dataset-agnostic pipeline for preprocessing EEG data.
-Supports various montage formats, quality checking, ICA, and flexible I/O.
-"""
 import mne
 import numpy as np
 import logging

@@ -1,17 +1,8 @@
-"""
-Unified EEG preprocessing script.
-
-Supports:
-- Multiple input formats (.edf, .set)
-- Batch HDF5 output or per-file BDF output
-- List file input for explicit file paths
-- Parallel processing with configurable workers
-- Quality metrics export
-"""
 import os
 import glob
 import logging
 import warnings
+import fcntl
 from pathlib import Path
 from time import sleep
 from typing import List, Union
@@ -23,7 +14,7 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from jsonargparse import CLI
 
-from speed.pipeline_unified import Pipeline
+from speed.pipeline import Pipeline
 from speed.utils import save_hdf5, write_bdf_from_raw
 
 
@@ -114,7 +105,10 @@ def preprocess_batch(
 
 def save_quality_metrics(metrics: List[dict], metrics_path: Path) -> None:
     """
-    Append quality metrics to CSV file.
+    Append quality metrics to CSV file with thread-safe file locking.
+    
+    This function is thread-safe for multiprocessing. It uses file locking
+    to ensure that multiple processes can safely append to the same CSV file.
     
     Parameters
     ----------
@@ -123,12 +117,53 @@ def save_quality_metrics(metrics: List[dict], metrics_path: Path) -> None:
     metrics_path : Path
         Directory to save the CSV file.
     """
+    if not metrics:
+        return
+    
     metrics_path = Path(metrics_path)
+    
+    # If metrics_path points to a file (e.g., quality_metrics.csv), get its parent directory
+    if metrics_path.exists() and metrics_path.is_file():
+        metrics_path = metrics_path.parent
+    elif metrics_path.suffix == '.csv':
+        # Path ends with .csv but file doesn't exist yet, treat as file path
+        metrics_path = metrics_path.parent
+    
+    # Ensure the directory exists
     metrics_path.mkdir(parents=True, exist_ok=True)
     csv_path = metrics_path / "quality_metrics.csv"
     
     df = pd.DataFrame(metrics)
-    df.to_csv(csv_path, mode="a", header=not csv_path.exists(), index=False)
+    
+    # Use file locking for thread-safe writing in multiprocessing
+    lock_path = csv_path.with_suffix('.csv.lock')
+    
+    # Acquire lock file
+    lock_file = None
+    try:
+        # Create lock file if it doesn't exist
+        lock_file = open(lock_path, 'w')
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        
+        # Check if file exists after acquiring lock (to avoid race condition)
+        file_exists = csv_path.exists()
+        
+        # Append mode: write header only if file doesn't exist
+        df.to_csv(csv_path, mode="a", header=not file_exists, index=False)
+        
+    except Exception as e:
+        logging.warning(f"Error writing quality metrics: {e}")
+    finally:
+        # Release lock
+        if lock_file is not None:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+                # Clean up lock file
+                if lock_path.exists():
+                    lock_path.unlink()
+            except Exception:
+                pass
 
 
 # =============================================================================
@@ -301,6 +336,22 @@ def preprocess_dataset(
     print(f"Processing {len(src_paths)} files in {len(batches)} batches with {n_jobs} workers...")
     
     metrics_path_obj = Path(metrics_path) if metrics_path else None
+    
+    # Handle metrics file overwrite logic
+    if metrics_path_obj is not None:
+        # If metrics_path points to a file (e.g., quality_metrics.csv), get its parent directory
+        if metrics_path_obj.exists() and metrics_path_obj.is_file():
+            metrics_path_obj = metrics_path_obj.parent
+        elif metrics_path_obj.suffix == '.csv':
+            # Path ends with .csv but file doesn't exist yet, treat as file path
+            metrics_path_obj = metrics_path_obj.parent
+        
+        # Ensure the directory exists
+        metrics_path_obj.mkdir(parents=True, exist_ok=True)
+        csv_path = metrics_path_obj / "quality_metrics.csv"
+        if overwrite and csv_path.exists():
+            csv_path.unlink()
+            logging.info("Removed existing quality_metrics.csv (overwrite=True).")
     
     if save_as_hdf5:
         dest_paths = create_dest_paths(out_path, len(batches))

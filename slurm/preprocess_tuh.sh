@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --partition=cyclopes
-#SBATCH --nodelist=comp-cpu02
+#SBATCH --nodelist=comp-cpu01
 #SBATCH --job-name=tuh_60s
 #SBATCH --output=/scratch/agjma/TUH_SPEED/logs/slurm-%J.out
 #SBATCH --ntasks=1
@@ -18,6 +18,6 @@ echo "Start: $(date +%F-%R:%S)"
 echo -e "Working dir: $(pwd)\n"
 
 source ~/.bashrc
-python scripts/preprocess_hbn.py --config configs/tuh_titans.yaml
+python scripts/preprocess.py --config configs/tuh.yaml
 
 echo "Done: $(date +%F-%R:%S)"
