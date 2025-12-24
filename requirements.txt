@@ -16,6 +16,7 @@ braindecode >= 0.7
 # preprocessing I/O
 h5py >= 3.9
 pyedflib >= 0.1.30
+# eeglabio >= 0.0.2  # Optional: for SET file export (pip install eeglabio)
 
 # utilities
 tqdm >= 4.66

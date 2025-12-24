@@ -286,10 +286,23 @@ class PretrainPipeline(BasePipeline):
     
     Supports configurable preprocessing with quality checking, ICA artifact
     rejection, montage handling, and flexible channel management.
+    
+    Can operate in two modes:
+    - Batch mode (default): Process multiple files, return windows for HDF5 batching
+    - Single-file mode: Process one file at a time with metadata preservation
+    
+    Parameters
+    ----------
+    All parameters from BasePipeline, plus:
+    
+    preserve_metadata : bool
+        If True, restore original metadata (subject info, dates, annotations)
+        after preprocessing. Useful for downstream tasks.
     """
     
-    def __init__(self, **kwargs):
+    def __init__(self, preserve_metadata: bool = False, **kwargs):
         super().__init__(**kwargs)
+        self.preserve_metadata = preserve_metadata
     
     def __call__(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
         """Process a batch of files and return preprocessed windows."""
@@ -297,12 +310,12 @@ class PretrainPipeline(BasePipeline):
     
     def run(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
         """
-        Load and preprocess EEG files.
+        Load and preprocess EEG files (batch mode).
         
         Parameters
         ----------
         src_paths : list of str or Path
-            Paths to source EEG files (.edf or .set).
+            Paths to source EEG files (.edf, .bdf, or .set).
         
         Returns
         -------
@@ -317,12 +330,17 @@ class PretrainPipeline(BasePipeline):
         logging.debug(f"Loading {len(src_paths)} files...")
         
         raws, times, indices = [], [], []
+        original_infos = []  # Store for metadata preservation
         
         for i, src_path in enumerate(src_paths):
             try:
                 raw_orig = self._load_raw_file(src_path)
                 if raw_orig is None:
                     continue
+                
+                # Store original info if preserving metadata
+                orig_info = raw_orig.info.copy() if self.preserve_metadata else None
+                orig_annot = raw_orig.annotations.copy() if self.preserve_metadata and raw_orig.annotations else None
                 
                 self._preprocess_channels(raw_orig, src_path)
                 
@@ -334,6 +352,7 @@ class PretrainPipeline(BasePipeline):
                 raws.extend(windows)
                 times.extend(window_times)
                 indices.extend([i] * len(windows))
+                original_infos.extend([(orig_info, orig_annot)] * len(windows))
                 
             except Exception as e:
                 logging.error(f"Dropping file: {src_path.stem}. Error: {e}")
@@ -346,9 +365,10 @@ class PretrainPipeline(BasePipeline):
             start_time = round(times[i][0], 1)
             end_time = round(times[i][1], 1)
             filename = src_paths[indices[i]]
+            orig_info, orig_annot = original_infos[i] if self.preserve_metadata else (None, None)
             
             try:
-                raws[i] = self.run_single(raws[i], start_time, end_time, filename)
+                raws[i] = self._run_single(raws[i], start_time, end_time, filename, orig_info, orig_annot)
             except Exception as e:
                 logging.error(
                     f"File: {filename}. Time: {(start_time, end_time)}. "
@@ -366,12 +386,89 @@ class PretrainPipeline(BasePipeline):
         
         return raws, times, indices
     
+    def process_single(
+        self,
+        src_path: str,
+        skip_on_quality_fail: bool = False
+    ) -> Tuple[Optional[mne.io.Raw], Optional[Tuple], bool]:
+        """
+        Process a single EEG file (single-file mode).
+        
+        Useful for downstream tasks where you want one output per input file.
+        
+        Parameters
+        ----------
+        src_path : str or Path
+            Path to the source EEG file.
+        skip_on_quality_fail : bool
+            If True, return None for files that fail quality checks.
+            If False, process them anyway.
+        
+        Returns
+        -------
+        raw : mne.io.Raw or None
+            Preprocessed raw object, or None if processing failed.
+        quality_metrics : tuple or None
+            Quality metrics (oha, thv, chv, bcr) if computed.
+        quality_passed : bool
+            Whether the file passed quality checks.
+        """
+        src_path = Path(src_path)
+        info_str = f"File: {src_path.name}"
+        
+        try:
+            raw = self._load_raw_file(src_path)
+            if raw is None:
+                logging.error(f"{info_str} Unsupported file format.")
+                return None, None, False
+            
+            # Store original info for metadata preservation
+            orig_info = raw.info.copy() if self.preserve_metadata else None
+            orig_annot = raw.annotations.copy() if self.preserve_metadata and raw.annotations else None
+            
+            self._preprocess_channels(raw, src_path)
+            
+            # Run quality check first (if needed for metrics or skip logic)
+            quality_passed = True
+            quality_metrics = None
+            did_quality_check = False
+            
+            if self.return_quality_metrics or skip_on_quality_fail:
+                quality_passed, quality_metrics = self._evaluate_quality(raw)
+                did_quality_check = True
+                
+                if self.return_quality_metrics:
+                    self._add_quality_metric(src_path, 0.0, raw.times[-1], quality_metrics)
+                
+                if not quality_passed and skip_on_quality_fail:
+                    logging.info(f"{info_str} Quality check failed. Skipping.")
+                    return None, quality_metrics, False
+            
+            # Process (skip quality check only if we already did it above)
+            raw = self._run_single(
+                raw, 0.0, raw.times[-1], src_path, orig_info, orig_annot,
+                skip_quality_check=did_quality_check
+            )
+            
+            if raw is None:
+                return None, quality_metrics, quality_passed
+            
+            logging.info(f"{info_str} Processing complete.")
+            return raw, quality_metrics, quality_passed
+            
+        except Exception as e:
+            logging.error(f"{info_str} Error: {e}")
+            traceback.print_exc()
+            return None, None, False
+    
     def _load_raw_file(self, src_path: Path) -> Optional[mne.io.Raw]:
         """Load a raw EEG file based on its extension."""
         suffix = src_path.suffix.lower()
         
         if suffix == ".edf":
             return mne.io.read_raw_edf(src_path, preload=True, verbose=False)
+        elif suffix == ".bdf":
+            return mne.io.read_raw_bdf(src_path, preload=True, verbose=False)
         elif suffix == ".set":
             with warnings.catch_warnings():
                 warnings.filterwarnings(
@@ -429,15 +526,18 @@ class PretrainPipeline(BasePipeline):
         
         return windows, times
     
-    def run_single(
+    def _run_single(
         self,
         raw: mne.io.Raw,
         start_time: float,
         end_time: float,
-        filename: Union[str, Path]
+        filename: Union[str, Path],
+        original_info: Optional[mne.Info] = None,
+        original_annotations: Optional[mne.Annotations] = None,
+        skip_quality_check: bool = False
     ) -> Optional[mne.io.Raw]:
         """
-        Process a single window.
+        Process a single window/file.
         
         Parameters
         ----------
@@ -449,6 +549,12 @@ class PretrainPipeline(BasePipeline):
             Window end time in seconds.
         filename : str or Path
             Source filename for logging.
+        original_info : mne.Info, optional
+            Original info to restore (if preserve_metadata=True).
+        original_annotations : mne.Annotations, optional
+            Original annotations to restore.
+        skip_quality_check : bool
+            If True, skip quality check (used when already done by caller).
         
         Returns
         -------
@@ -457,14 +563,15 @@ class PretrainPipeline(BasePipeline):
         """
         info_str = f"File: {filename}. Time: ({start_time}, {end_time})."
         
-        # Quality check
-        passed, metrics = self._run_quality_check(raw, info_str)
-        
-        if self.return_quality_metrics:
-            self._add_quality_metric(filename, start_time, end_time, metrics)
-        
-        if not passed:
-            return None
+        # Quality check (skip if already done by caller, e.g., process_single)
+        if not skip_quality_check:
+            passed, metrics = self._run_quality_check(raw, info_str)
+            
+            if self.return_quality_metrics:
+                self._add_quality_metric(filename, start_time, end_time, metrics)
+            
+            if not passed:
+                return None
         
         # Line noise removal
         self._remove_line_noise(raw)
@@ -507,6 +614,10 @@ class PretrainPipeline(BasePipeline):
         # Resample to target frequency
         self._interpolate_nearest(raw)
         
+        # Restore metadata if requested
+        if self.preserve_metadata and original_info is not None:
+            self._restore_metadata(raw, original_info, original_annotations)
+        
         return raw
     
     def _run_quality_check(
@@ -534,3 +645,33 @@ class PretrainPipeline(BasePipeline):
             return False, metrics
         
         return True, metrics
+    
+    def _restore_metadata(
+        self,
+        raw: mne.io.Raw,
+        original_info: mne.Info,
+        original_annotations: Optional[mne.Annotations]
+    ) -> None:
+        """Restore non-signal metadata from the original file."""
+        if original_info.get('meas_date') is not None:
+            with raw.info._unlock():
+                raw.info['meas_date'] = original_info['meas_date']
+        
+        if original_info.get('subject_info') is not None:
+            with raw.info._unlock():
+                raw.info['subject_info'] = original_info['subject_info']
+        
+        if original_info.get('device_info') is not None:
+            with raw.info._unlock():
+                raw.info['device_info'] = original_info['device_info']
+        
+        if original_info.get('experimenter') is not None:
+            with raw.info._unlock():
+                raw.info['experimenter'] = original_info['experimenter']
+        
+        if original_info.get('description') is not None:
+            with raw.info._unlock():
+                raw.info['description'] = original_info['description']
+        
+        if original_annotations is not None and len(original_annotations) > 0:
+            raw.set_annotations(original_annotations)

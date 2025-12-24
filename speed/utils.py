@@ -1,95 +1,72 @@
-"""
-Utility functions for EEG preprocessing.
+"""Utility functions for EEG preprocessing."""
 
-Includes:
-- Channel name resolution and standardization
-- Raw data windowing and splitting
-- Montage creation
-- I/O functions for HDF5 and BDF formats
-"""
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
+import logging
+import shutil
+import fnmatch
 
 import mne
 import numpy as np
 import h5py
 
 
-# =============================================================================
-# Channel Name Resolution
-# =============================================================================
+# --- Channel Name Resolution ---
 
-def _heuristic_eeg_resolution(eeg_ch_name: str):
-    return eeg_ch_name if len(eeg_ch_name) > 0 else None
+def _clean_channel_name(name: str) -> str:
+    """Normalize channel name: uppercase, remove common prefixes/suffixes."""
+    name = name.upper()
+    if name == "REF":
+        return name
+    for substr in ('EEG', 'LE', 'REF', 'EAR'):
+        name = name.replace(substr, '')
+    return ''.join(c for c in name if c.isalnum())
 
 
-def _heuristic_eog_resolution(eog_channel_name):
-    return eog_channel_name
+_CH_TYPE_MARKERS = {
+    'ref': (("A1", "A2"),),
+    'ecg': (('ECG', 'EKG'),),
+    'extra': (('PHOTIC', 'IBI', 'BURSTS', 'SUPPR'),),
+    'eog': (('ROC', 'LOC'),),
+}
 
 
-def _heuristic_ref_resolution(ref_channel_name: str):
-    if ref_channel_name.find('A1') != -1:
-        return 'A1'
-    elif ref_channel_name.find('A2') != -1:
-        return 'A2'
-    if ref_channel_name.find('L') != -1:
-        return 'A1'
-    elif ref_channel_name.find('R') != -1:
-        return 'A2'
-    else:
+def _resolve_channel_name(name: str, ch_type: str) -> Optional[str]:
+    """Map channel name to standardized form based on type."""
+    name = _clean_channel_name(name)
+    
+    if ch_type == 'eeg':
+        return name or None
+    if ch_type == 'eog':
+        return name
+    if ch_type == 'ref':
+        if 'A1' in name or 'L' in name:
+            return 'A1'
+        if 'A2' in name or 'R' in name:
+            return 'A2'
         return "REF"
+    if ch_type == 'ecg':
+        return "EKG" + ''.join(c for c in name if c.isdigit())
+    return name
 
 
-def _heuristic_ecg_resolution(ecg_ch_name: str):
-    n = ''.join([i for i in ecg_ch_name if i.isdigit()])
-    return "EKG" + n
-
-
-def _heuristic_extra_resolution(extra_ch_name: str):
-    return extra_ch_name
-
-
-def _clean_channel_name(channel_name: str):
-    channel_name = channel_name.upper()
-    if channel_name == "REF":
-        return channel_name
-    channel_name = channel_name.replace('EEG', '')
-    channel_name = channel_name.replace('LE', '')
-    channel_name = channel_name.replace('REF', '')
-    channel_name = channel_name.replace('EAR', '')
-    channel_name = ''.join(c for c in channel_name if c.isalnum())
-    return channel_name
-
-
-def create_channel_type_dict(raw: mne.io.Raw) -> dict:
-    """Create a dictionary mapping channel names to their types."""
-    type_dict = dict()
-    for k, v in dict(zip(raw.info['ch_names'], raw.get_channel_types())).items():
-        if any([x in k for x in ["A1", "A2"]]):
-            type_dict[k] = 'ref'
-        elif 'ECG' in k or 'EKG' in k:
-            type_dict[k] = 'ecg'
-        elif any([x in k for x in ['PHOTIC', 'IBI', 'BURSTS', 'SUPPR']]):
-            type_dict[k] = 'extra'
-        elif any([x in k for x in ['ROC', 'LOC']]):
-            type_dict[k] = 'eog'
+def create_channel_type_dict(raw: mne.io.Raw) -> Dict[str, str]:
+    """Create mapping of channel names to their types."""
+    type_dict = {}
+    for name, ch_type in zip(raw.info['ch_names'], raw.get_channel_types()):
+        for override_type, (markers,) in _CH_TYPE_MARKERS.items():
+            if any(m in name for m in markers):
+                type_dict[name] = override_type
+                break
         else:
-            type_dict[k] = v
+            type_dict[name] = ch_type
     return type_dict
 
 
 def heuristic_resolution(old_type_dict: OrderedDict) -> OrderedDict:
     """Resolve channel names to standardized names based on channel type."""
-    resolver = {
-        'eeg': _heuristic_eeg_resolution,
-        'eog': _heuristic_eog_resolution,
-        'ref': _heuristic_ref_resolution,
-        'ecg': _heuristic_ecg_resolution,
-        'extra': _heuristic_extra_resolution
-    }
-    
     new_type_dict = OrderedDict()
     
     for old_name, ch_type in old_type_dict.items():
@@ -97,23 +74,36 @@ def heuristic_resolution(old_type_dict: OrderedDict) -> OrderedDict:
             new_type_dict[old_name] = None
             continue
         
-        new_name = _clean_channel_name(old_name)
-        new_name = resolver[ch_type](new_name)
-        
+        new_name = _resolve_channel_name(old_name, ch_type)
         if new_name is None:
-            new_type_dict[new_name] = None
+            new_type_dict[old_name] = None
         else:
-            while new_name in new_type_dict.keys():
-                new_name = new_name + '-COPY'
-            new_type_dict[new_name] = old_type_dict[old_name]
+            while new_name in new_type_dict:
+                new_name += '-COPY'
+            new_type_dict[new_name] = ch_type
     
     assert len(new_type_dict) == len(old_type_dict)
     return new_type_dict
 
 
-# =============================================================================
-# Raw Data Windowing
-# =============================================================================
+# --- Raw Data Windowing ---
+
+def _create_window_raw(
+    data: np.ndarray,
+    raw: mne.io.Raw,
+    montage: Optional[mne.channels.DigMontage]
+) -> mne.io.Raw:
+    """Create a RawArray from windowed data, preserving channel info."""
+    info = mne.create_info(
+        ch_names=raw.info['ch_names'],
+        sfreq=raw.info['sfreq'],
+        ch_types=raw.get_channel_types()
+    )
+    window_raw = mne.io.RawArray(data, info, verbose=False)
+    if montage is not None:
+        window_raw.set_montage(montage)
+    return window_raw
+
 
 def split_raw(
     raw: mne.io.Raw,
@@ -141,60 +131,50 @@ def split_raw(
     """
     sfreq = raw.info['sfreq']
     window_samples = int(window_length * sfreq)
+    shift_samples = int((shift_seconds or window_length) * sfreq)
+    montage = raw.get_montage()
     
-    if shift_seconds is None or shift_seconds == 0:
-        shift_seconds = window_length
-    shift_samples = int(shift_seconds * sfreq)
+    windows, time_slices = [], []
+    start = 0
     
-    windows = []
-    time_slices = []
-    start_sample = 0
-    
-    while start_sample + window_samples <= raw.n_times:
-        end_sample = start_sample + window_samples
-        window, times = raw[:, start_sample:end_sample]
-        
-        info = mne.create_info(
-            ch_names=raw.info['ch_names'],
-            sfreq=sfreq,
-            ch_types=raw.get_channel_types()
-        )
-        window_raw = mne.io.RawArray(window, info, verbose=False)
-        window_raw.set_montage(raw.get_montage())
-        
-        windows.append(window_raw)
+    while start + window_samples <= raw.n_times:
+        data, times = raw[:, start:start + window_samples]
+        windows.append(_create_window_raw(data, raw, montage))
         time_slices.append((times[0], times[-1]))
-        start_sample += shift_samples
+        start += shift_samples
     
     return windows, time_slices
 
 
-def get_unannotated_raw(raw: mne.io.Raw, resting_state: List[str] = ['T0']) -> mne.io.Raw:
+def get_unannotated_raw(
+    raw: mne.io.Raw,
+    resting_state: List[str] = None
+) -> mne.io.Raw:
     """Extract non-annotated segments from raw data."""
-    non_annotated_data_segments = []
+    if resting_state is None:
+        resting_state = ['T0']
+    
     sfreq = raw.info['sfreq']
+    annotations = sorted(raw.annotations, key=lambda a: a['onset'])
+    segments = []
+    last_end = 0
     
-    annotations = sorted(raw.annotations, key=lambda ann: ann['onset'])
-    last_end_sample = 0
+    for ann in annotations:
+        if ann['description'] in resting_state:
+            continue
+        onset = int(ann['onset'] * sfreq)
+        end = int((ann['onset'] + ann['duration']) * sfreq)
+        
+        if onset > last_end:
+            segments.append(raw[:, last_end:onset][0])
+        last_end = end
     
-    for annotation in annotations:
-        if annotation['description'] not in resting_state:
-            onset_sample = int(annotation['onset'] * sfreq)
-            end_sample = int((annotation['onset'] + annotation['duration']) * sfreq)
-            
-            if onset_sample > last_end_sample:
-                segment_data, _ = raw[:, last_end_sample:onset_sample]
-                non_annotated_data_segments.append(segment_data)
-            
-            last_end_sample = end_sample
+    if last_end < raw.n_times:
+        segments.append(raw[:, last_end:raw.n_times][0])
     
-    if last_end_sample < raw.n_times:
-        segment_data, _ = raw[:, last_end_sample:raw.n_times]
-        non_annotated_data_segments.append(segment_data)
-    
-    concatenated_data = np.concatenate(non_annotated_data_segments, axis=1)
+    data = np.concatenate(segments, axis=1)
     info = mne.create_info(ch_names=raw.info['ch_names'], sfreq=sfreq, ch_types='eeg')
-    return mne.io.RawArray(concatenated_data, info)
+    return mne.io.RawArray(data, info)
 
 
 def split_raw_annotations(
@@ -205,73 +185,50 @@ def split_raw_annotations(
     verbose: bool = True
 ) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[str]]:
     """Split raw data based on annotations."""
-    windows = []
-    time_slices = []
-    descriptions = []
+    sfreq = raw.info['sfreq']
+    montage = raw.get_montage()
+    windows, time_slices, descriptions = [], [], []
     
-    for annotation in raw.annotations:
-        onset, duration, description, _ = annotation.values()
-        
+    for ann in raw.annotations:
+        onset, duration, description, _ = ann.values()
         if description not in labels:
             continue
         
-        sfreq = raw.info['sfreq']
-        start_sample = round((onset + tmin) * sfreq)
+        start = round((onset + tmin) * sfreq)
+        end = start + round(tlen * sfreq)
         
-        if start_sample < 0:
+        if start < 0 or end > raw.n_times:
             if verbose:
                 print(f'Skipping {description} at {onset:.2f} s')
             continue
         
-        tlen_sample = round(tlen * sfreq)
-        end_sample = start_sample + tlen_sample
-        
-        if end_sample > raw.n_times:
-            if verbose:
-                print(f'Skipping {description} at {onset:.2f} s')
-            continue
-        
-        window, times = raw[:, start_sample:end_sample]
-        
-        info = mne.create_info(
-            ch_names=raw.info['ch_names'],
-            sfreq=sfreq,
-            ch_types=raw.get_channel_types()
-        )
-        window_raw = mne.io.RawArray(window, info, verbose=False)
-        window_raw.set_montage(raw.get_montage())
-        
-        windows.append(window_raw)
+        data, times = raw[:, start:end]
+        windows.append(_create_window_raw(data, raw, montage))
         time_slices.append((times[0], times[-1]))
         descriptions.append(description)
     
     return windows, time_slices, descriptions
 
 
-# =============================================================================
-# Montage Creation
-# =============================================================================
+# --- Montage Creation ---
 
 def make_tuh_montage() -> mne.channels.DigMontage:
-    """
-    Create a custom montage for TUH dataset.
+    """Create a custom montage for TUH dataset."""
+    standard = mne.channels.make_standard_montage('standard_1005')
+    postfixed = mne.channels.make_standard_montage('standard_postfixed')
     
-    Combines standard_1005 with T1/T2 positions from standard_postfixed.
-    """
-    standard_1005 = mne.channels.make_standard_montage('standard_1005')
-    standard_postfixed = mne.channels.make_standard_montage('standard_postfixed')
+    pos = standard.get_positions()
+    ch_pos = pos['ch_pos'].copy()
     
-    t1_pos = standard_postfixed.get_positions()['ch_pos']['T1']
-    t2_pos = standard_postfixed.get_positions()['ch_pos']['T2']
+    # Add T1/T2 from postfixed montage
+    postfixed_pos = postfixed.get_positions()['ch_pos']
+    ch_pos['T1'] = postfixed_pos['T1']
+    ch_pos['T2'] = postfixed_pos['T2']
     
-    pos = standard_1005.get_positions()
-    ch_pos = pos['ch_pos']
-    ch_pos['T1'] = t1_pos
-    ch_pos['T2'] = t2_pos
+    # Normalize case (e.g., 'FP1' -> 'Fp1')
+    ch_pos = OrderedDict((ch.lower().capitalize(), p) for ch, p in ch_pos.items())
     
-    ch_pos = OrderedDict({ch.lower().capitalize(): p for ch, p in ch_pos.items()})
-    
-    montage = mne.channels.make_dig_montage(
+    return mne.channels.make_dig_montage(
         ch_pos=ch_pos,
         nasion=pos['nasion'],
         lpa=pos['lpa'],
@@ -280,38 +237,27 @@ def make_tuh_montage() -> mne.channels.DigMontage:
         hpi=pos['hpi'],
         coord_frame=pos['coord_frame']
     )
-    return montage
 
 
-def load_montage(montage_source: str) -> Optional[mne.channels.DigMontage]:
+def load_montage(montage_source: Optional[str]) -> Optional[mne.channels.DigMontage]:
     """
     Load a montage from various sources.
     
     Parameters
     ----------
-    montage_source : str
-        Either:
-        - "tuh" for TUH custom montage
-        - A standard MNE montage name (e.g., "standard_1005")
-        - A path to a .fif montage file
-    
-    Returns
-    -------
-    montage : DigMontage or None
+    montage_source : str or None
+        Either "tuh", a standard MNE montage name, or path to .fif file.
     """
     if montage_source is None:
         return None
-    elif montage_source == "tuh":
+    if montage_source == "tuh":
         return make_tuh_montage()
-    elif Path(montage_source).exists() and montage_source.endswith('.fif'):
+    if montage_source.endswith('.fif') and Path(montage_source).exists():
         return mne.channels.read_dig_fif(montage_source)
-    else:
-        return mne.channels.make_standard_montage(montage_source)
+    return mne.channels.make_standard_montage(montage_source)
 
 
-# =============================================================================
-# I/O Functions
-# =============================================================================
+# --- I/O Functions ---
 
 def save_hdf5(
     raws: List[mne.io.Raw],
@@ -320,22 +266,7 @@ def save_hdf5(
     indices: List[int],
     dest_path: Path
 ) -> None:
-    """
-    Save preprocessed data as HDF5 batch file.
-    
-    Parameters
-    ----------
-    raws : list of mne.io.Raw
-        Preprocessed raw objects.
-    src_paths : list of Path
-        Original source file paths.
-    times : list of tuple
-        (start_time, end_time) for each window.
-    indices : list of int
-        Index of source file for each window.
-    dest_path : Path
-        Output HDF5 file path.
-    """
+    """Save preprocessed data as HDF5 batch file."""
     with h5py.File(dest_path, "w") as f:
         f.attrs["files"] = [p.stem for p in src_paths]
         f.attrs["file_idxs"] = indices
@@ -343,103 +274,253 @@ def save_hdf5(
         f.create_dataset("data", data=np.array([r._data for r in raws]), dtype='float32')
 
 
-def write_bdf_from_raw(
+def _round_to_edf8(x: float) -> float:
+    """Round value to fit in 8-character EDF/BDF physical min/max field."""
+    sign = "-" if x < 0 else ""
+    int_digits = len(str(int(abs(x))))
+    decimals = max(0, 7 - len(sign) - int_digits)
+    return float(int(x)) if decimals == 0 else round(x, decimals)
+
+
+def _prepare_edf_data(raw: mne.io.Raw) -> Tuple[np.ndarray, List[str], float, np.ndarray, np.ndarray]:
+    """Prepare data and compute physical ranges for EDF/BDF export."""
+    picks = mne.pick_types(
+        raw.info,
+        eeg=True, eog=True, ecg=True, emg=True, misc=True, stim=True,
+        seeg=True, dbs=True, ecog=True, resp=True, bio=True, exci=True,
+        ias=True, syst=True
+    )
+    if len(picks) == 0:
+        raise RuntimeError("No writable channels were found.")
+    
+    data_uv = raw.get_data(picks).astype(np.float64) * 1e6
+    ch_names = [raw.ch_names[i] for i in picks]
+    sfreq = float(raw.info["sfreq"])
+    
+    # Add 1% margin to physical ranges
+    pmins, pmaxs = data_uv.min(axis=1), data_uv.max(axis=1)
+    margin = 0.01 * np.maximum(pmaxs - pmins, 1.0)
+    pmins -= margin
+    pmaxs += margin
+    
+    pmins = np.array([_round_to_edf8(v) for v in pmins])
+    pmaxs = np.array([_round_to_edf8(v) for v in pmaxs])
+    
+    # Fix invalid ranges
+    invalid = ~np.isfinite(pmins) | ~np.isfinite(pmaxs) | (pmaxs <= pmins)
+    pmins[invalid], pmaxs[invalid] = -1.0, 1.0
+    
+    return data_uv, ch_names, sfreq, pmins, pmaxs
+
+
+def _write_edf_bdf(raw: mne.io.Raw, out_path: str, write_annotations: bool, is_bdf: bool) -> None:
+    """Write EDF/BDF file using pyedflib."""
+    try:
+        import pyedflib
+    except ImportError as e:
+        raise ImportError("pyedflib required for EDF/BDF export: pip install pyedflib") from e
+    
+    data_uv, ch_names, sfreq, pmins, pmaxs = _prepare_edf_data(raw)
+    
+    digital_min, digital_max = (-8388608, 8388607) if is_bdf else (-32768, 32767)
+    file_type = pyedflib.FILETYPE_BDFPLUS if is_bdf else pyedflib.FILETYPE_EDFPLUS
+    
+    sig_headers = [
+        {
+            "label": name[:16],
+            "dimension": "uV",
+            "sample_frequency": sfreq,
+            "physical_min": float(pmin),
+            "physical_max": float(pmax),
+            "digital_min": digital_min,
+            "digital_max": digital_max
+        }
+        for name, pmin, pmax in zip(ch_names, pmins, pmaxs)
+    ]
+    
+    md = raw.info.get("meas_date")
+    if isinstance(md, (tuple, list)):
+        md = md[0]
+    startdate = md.replace(tzinfo=None) if md else datetime.now()
+    
+    f = pyedflib.EdfWriter(str(out_path), n_channels=len(sig_headers), file_type=file_type)
+    try:
+        f.setSignalHeaders(sig_headers)
+        f.setStartdatetime(startdate)
+        f.writeSamples(list(data_uv))
+        
+        if write_annotations and len(raw.annotations) > 0:
+            first_time = float(raw.first_time)
+            for onset, dur, desc in zip(
+                raw.annotations.onset,
+                raw.annotations.duration,
+                raw.annotations.description
+            ):
+                f.writeAnnotation(float(onset + first_time), float(dur), str(desc))
+    finally:
+        f.close()
+
+
+def write_bdf_from_raw(raw: mne.io.Raw, out_path: str, write_annotations: bool = True) -> None:
+    """Export MNE Raw object to BDF+ format."""
+    _write_edf_bdf(raw, out_path, write_annotations, is_bdf=True)
+
+
+def write_edf_from_raw(raw: mne.io.Raw, out_path: str, write_annotations: bool = True) -> None:
+    """Export MNE Raw object to EDF+ format."""
+    _write_edf_bdf(raw, out_path, write_annotations, is_bdf=False)
+
+
+def write_set_from_raw(raw: mne.io.Raw, out_path: str, write_annotations: bool = True) -> None:
+    """Export MNE Raw object to EEGLAB .set format."""
+    try:
+        import eeglabio  # noqa: F401
+        raw.export(out_path, fmt='eeglab', overwrite=True)
+    except ImportError as e:
+        raise ImportError("eeglabio required for SET export: pip install eeglabio") from e
+
+
+_FORMAT_WRITERS = {
+    "edf": (write_edf_from_raw, ".edf"),
+    "bdf": (write_bdf_from_raw, ".bdf"),
+    "set": (write_set_from_raw, ".set"),
+}
+
+
+def write_raw_to_file(
     raw: mne.io.Raw,
     out_path: str,
-    write_annotations: bool = True
-) -> None:
+    format: str = "auto",
+    write_annotations: bool = True,
+    fallback_format: str = "edf"
+) -> str:
     """
-    Export MNE Raw object to BDF+ format using pyedflib.
+    Write MNE Raw object to file, preserving format when possible.
     
     Parameters
     ----------
     raw : mne.io.Raw
         The raw EEG data to export.
     out_path : str
-        Output file path.
+        Output file path. Extension determines format if format="auto".
+    format : str
+        Output format: "auto", "edf", "bdf", or "set".
     write_annotations : bool
         Whether to include annotations in the output file.
+    fallback_format : str
+        Format to use if the requested format is not available.
     
-    Raises
-    ------
-    ImportError
-        If pyedflib is not installed.
-    RuntimeError
-        If no writable channels are found.
+    Returns
+    -------
+    str
+        The actual output path used.
     """
+    out_path = Path(out_path)
+    
+    if format == "auto":
+        ext_map = {".edf": "edf", ".bdf": "bdf", ".set": "set"}
+        format = ext_map.get(out_path.suffix.lower(), fallback_format)
+    
+    writer, expected_ext = _FORMAT_WRITERS.get(format, _FORMAT_WRITERS[fallback_format])
+    
+    if out_path.suffix.lower() != expected_ext:
+        out_path = out_path.with_suffix(expected_ext)
+    
     try:
-        import pyedflib
-        from pyedflib import FILETYPE_BDFPLUS
-    except ImportError:
-        raise ImportError("pyedflib is required for BDF export. Install with: pip install pyedflib")
+        writer(raw, str(out_path), write_annotations)
+        return str(out_path)
+    except ImportError as e:
+        logging.warning(f"Cannot write {format} format: {e}. Using {fallback_format}.")
+        writer, expected_ext = _FORMAT_WRITERS[fallback_format]
+        out_path = out_path.with_suffix(expected_ext)
+        writer(raw, str(out_path), write_annotations)
+        return str(out_path)
+
+
+# --- File Copy Utilities ---
+
+DEFAULT_EXCLUDE_PATTERNS = [
+    # Version control
+    ".git", ".git/**", ".gitignore", ".gitattributes",
+    ".svn", ".svn/**", ".hg", ".hg/**",
+    # Python
+    "__pycache__", "__pycache__/**", "*.pyc", "*.pyo", "*.pyd",
+    ".pytest_cache", ".pytest_cache/**",
+    "*.egg-info", "*.egg-info/**",
+    ".eggs", ".eggs/**",
+    "venv", "venv/**", ".venv", ".venv/**",
+    "env", "env/**", ".env",
+    # IDE/Editor
+    ".idea", ".idea/**", ".vscode", ".vscode/**",
+    "*.swp", "*.swo", "*~",
+    ".project", ".pydevproject", ".settings", ".settings/**",
+    # OS
+    ".DS_Store", "Thumbs.db", "desktop.ini",
+    # Build/Output
+    "build", "build/**", "dist", "dist/**",
+    # Temp files
+    "*.tmp", "*.temp", "*.bak", "*.log",
+    # Lock files
+    "*.lock", ".*.lock",
+]
+
+
+def should_exclude_file(file_path: Path, base_path: Path, patterns: List[str]) -> bool:
+    """Check if a file should be excluded based on glob patterns."""
+    try:
+        rel_path = file_path.relative_to(base_path)
+    except ValueError:
+        rel_path = file_path
     
-    picks = mne.pick_types(
-        raw.info,
-        eeg=True, eog=True, ecg=True, emg=True, misc=True, stim=True,
-        seeg=True, dbs=True, ecog=True, resp=True, bio=True, exci=True, ias=True, syst=True
-    )
-    if len(picks) == 0:
-        raise RuntimeError("No writable channels were found.")
+    rel_str = str(rel_path)
+    name = file_path.name
     
-    data_v = raw.get_data(picks).astype(np.float64)
-    data_uv = data_v * 1e6
-    ch_names = [raw.ch_names[i] for i in picks]
-    sfreq = float(raw.info["sfreq"])
+    for pattern in patterns:
+        if fnmatch.fnmatch(rel_str, pattern) or fnmatch.fnmatch(name, pattern):
+            return True
+        # Check parent directories
+        if any(fnmatch.fnmatch(str(p), pattern) or fnmatch.fnmatch(p.name, pattern) for p in rel_path.parents):
+            return True
+    return False
+
+
+def copy_non_eeg_files(
+    src_dir: Path,
+    dest_dir: Path,
+    eeg_extensions: List[str],
+    exclude_patterns: Optional[List[str]] = None,
+    overwrite: bool = False
+) -> Dict[str, Any]:
+    """
+    Copy all non-EEG files from source to destination, preserving structure.
     
-    def round_to_edf8(x: float) -> float:
-        """Round value to fit in 8-character EDF field."""
-        s = "-" if x < 0 else ""
-        int_digits = len(str(int(abs(x))))
-        max_decimals = max(0, 7 - len(s) - int_digits)
-        if max_decimals == 0:
-            return float(f"{int(x)}")
-        return float(f"{x:.{max_decimals}f}")
+    Returns dict with keys: copied, skipped, excluded, errors
+    """
+    patterns = exclude_patterns if exclude_patterns is not None else DEFAULT_EXCLUDE_PATTERNS.copy()
+    eeg_exts = {ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in eeg_extensions}
     
-    MARGIN_PCT = 0.01
-    pmins = data_uv.min(axis=1)
-    pmaxs = data_uv.max(axis=1)
-    spans = np.maximum(pmaxs - pmins, 1.0)
-    pmins = pmins - MARGIN_PCT * spans
-    pmaxs = pmaxs + MARGIN_PCT * spans
+    stats: Dict[str, Any] = {"copied": [], "skipped": [], "excluded": [], "errors": []}
+    src_dir, dest_dir = Path(src_dir), Path(dest_dir)
     
-    pmins = np.array([round_to_edf8(v) for v in pmins], dtype=float)
-    pmaxs = np.array([round_to_edf8(v) for v in pmaxs], dtype=float)
+    for src_file in src_dir.rglob("*"):
+        if not src_file.is_file() or src_file.suffix.lower() in eeg_exts:
+            continue
+        
+        if should_exclude_file(src_file, src_dir, patterns):
+            stats["excluded"].append(str(src_file))
+            continue
+        
+        dest_file = dest_dir / src_file.relative_to(src_dir)
+        
+        if dest_file.exists() and not overwrite:
+            stats["skipped"].append(str(dest_file))
+            continue
+        
+        try:
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dest_file)
+            stats["copied"].append(str(dest_file))
+        except Exception as e:
+            stats["errors"].append((str(src_file), str(e)))
     
-    DEFAULT_WINDOW_UV = 1.0
-    for i in range(len(pmins)):
-        if not np.isfinite(pmins[i]) or not np.isfinite(pmaxs[i]) or pmaxs[i] <= pmins[i]:
-            pmins[i] = -DEFAULT_WINDOW_UV
-            pmaxs[i] = +DEFAULT_WINDOW_UV
-    
-    sig_headers = []
-    for name, pmin, pmax in zip(ch_names, pmins, pmaxs):
-        sig_headers.append({
-            "label": name[:16],
-            "dimension": "uV",
-            "sample_frequency": sfreq,
-            "physical_min": float(pmin),
-            "physical_max": float(pmax),
-            "digital_min": -8388608,
-            "digital_max": 8388607
-        })
-    
-    md = raw.info.get("meas_date")
-    if md is not None and isinstance(md, (tuple, list)):
-        md = md[0]
-    startdate = md.replace(tzinfo=None) if md is not None else datetime.now()
-    
-    f = pyedflib.EdfWriter(str(out_path), n_channels=len(sig_headers), file_type=FILETYPE_BDFPLUS)
-    f.setSignalHeaders(sig_headers)
-    f.setStartdatetime(startdate)
-    f.writeSamples([data_uv[i] for i in range(len(sig_headers))])
-    
-    if write_annotations and len(raw.annotations) > 0:
-        first_time = float(raw.first_time)
-        for onset, duration, desc in zip(
-            raw.annotations.onset,
-            raw.annotations.duration,
-            raw.annotations.description
-        ):
-            f.writeAnnotation(float(onset + first_time), float(duration), str(desc))
-    
-    f.close()
+    return stats

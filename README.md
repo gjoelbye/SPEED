@@ -63,6 +63,114 @@ python scripts/hdf5_combiner.py {input_folder} {output_folder}
 ```
 Use `--file_size` to set maximum filesize in MB (default: 2000).
 
+---
+
+## Downstream Preprocessing
+
+For downstream tasks where you need to preserve the original file structure, naming, and format, use the **downstream mode** by setting `preserve_structure: true`.
+
+### What it does:
+- Processes full files (no windowing)
+- Preserves original folder structure
+- Preserves original file naming  
+- Preserves original file format (EDF → EDF, BDF → BDF, SET → SET)
+- Preserves metadata (subject info, recording date, annotations)
+- Optionally copies non-EEG files to maintain complete folder structure
+
+### Usage
+
+```bash
+python scripts/preprocess.py --config configs/downstream_example.yaml
+```
+
+### Example Configuration
+
+```yaml
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true         # Key: restore metadata after preprocessing
+    window_length: null             # Key: process full files
+    sfreq: 256.0
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [60.0]
+    do_ica: true
+    montage: tuh
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    standardize_channel_names: true
+    return_quality_metrics: true
+
+dataset_path: /path/to/input/dataset
+out_path: /path/to/output
+log_path: /path/to/output/log.txt
+metrics_path: /path/to/output/
+
+# Key downstream options
+preserve_structure: true            # Enable downstream mode
+output_format: auto                 # Preserve original format
+skip_on_quality_fail: false         # Process all files, even if quality check fails
+copy_other_files: true              # Copy non-EEG files (JSON, CSV, etc.)
+
+file_extension: ".edf"
+n_jobs: 4
+```
+
+### Downstream-Specific Options
+
+| Parameter | Description |
+|-----------|-------------|
+| `preserve_structure` | If `true`, preserve folder structure (downstream mode). If `false`, batch into HDF5 (pretrain mode). |
+| `preserve_metadata` | Pipeline option to restore original metadata after preprocessing. |
+| `skip_on_quality_fail` | If `true`, skip files that fail quality checks. If `false`, process them anyway. |
+| `output_format` | `"auto"` = preserve original format, or force `"edf"`, `"bdf"`, `"set"` |
+| `fallback_format` | Format to use if requested format is unavailable (`"edf"` or `"bdf"`) |
+| `copy_other_files` | Copy non-EEG files to preserve complete folder structure |
+| `exclude_patterns` | Patterns to exclude when copying (default excludes `.git`, `__pycache__`, etc.) |
+
+### Example: Process TUH dataset preserving structure
+
+```bash
+# Input structure:
+# /data/tuh_raw/
+#   ├── subject_001/
+#   │   ├── session_01/
+#   │   │   ├── recording.edf
+#   │   │   └── metadata.json
+#   │   └── session_02/
+#   │       └── recording.edf
+#   └── subject_002/
+#       └── session_01/
+#           └── recording.edf
+
+python scripts/preprocess.py \
+    --pipeline.init_args.preserve_metadata true \
+    --pipeline.init_args.window_length null \
+    --pipeline.init_args.channels "[Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8]" \
+    --dataset_path /data/tuh_raw/ \
+    --out_path /data/tuh_processed/ \
+    --preserve_structure true \
+    --output_format auto \
+    --copy_other_files true \
+    --n_jobs 8
+
+# Output structure (preserved):
+# /data/tuh_processed/
+#   ├── subject_001/
+#   │   ├── session_01/
+#   │   │   ├── recording.edf    (preprocessed)
+#   │   │   └── metadata.json    (copied)
+#   │   └── session_02/
+#   │       └── recording.edf    (preprocessed)
+#   └── subject_002/
+#       └── session_01/
+#           └── recording.edf    (preprocessed)
+```
+
+See `configs/downstream_example.yaml` for a complete reference with all parameters.
+
+---
+
 ## Important Files
 
 ### `scripts/preprocess.py`
@@ -174,7 +282,6 @@ save_as_hdf5: true
 - `batch_size`: Files per HDF5 batch.
 - `n_jobs`: Parallel workers.
 - `file_extension`: File extensions to process (`.edf`, `.set`, or list).
-- `list_file`: Text file with explicit file paths.
 - `save_as_hdf5`: `true` = batch HDF5, `false` = individual BDF files.
 
 See `configs/example.yaml` for a complete reference with all parameters.

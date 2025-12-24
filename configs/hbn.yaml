@@ -73,7 +73,6 @@ shuffle_files: True          # Randomly shuffle file order.
 batch_size: 8                 # Files per HDF5 batch (ignored if save_as_hdf5=false).
 n_jobs: 48                    # Number of parallel workers.
 file_extension: ".set"        # Extension(s): ".edf", ".set", or [".edf", ".set"].
-list_file: null               # Text file with explicit file paths.
 save_as_hdf5: true           # true = batch HDF5, false = individual BDF files.
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR.
 sleep_after_batch: 5.0        # Seconds to sleep after each batch.

@@ -115,6 +115,7 @@ cython_debug/
 
 # VS Code settings
 .vscode/
+.cursor/
 
 # PyCharm settings
 .idea/
