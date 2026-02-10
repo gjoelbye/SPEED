@@ -114,6 +114,12 @@ def preprocess_downstream(
     logging.info(f"Event windowing: {pipeline.event_windowing}")
     logging.info(f"Event labels: {pipeline.event_labels}")
 
+    if n_jobs > 1:
+        logging.warning(
+            f"n_jobs={n_jobs} specified but parallel processing is not yet "
+            f"implemented for downstream. Processing will be sequential."
+        )
+
     # Validate pipeline configuration
     if not pipeline.event_windowing:
         raise ValueError("Pipeline must have event_windowing=True for downstream preprocessing")
@@ -167,10 +173,6 @@ def preprocess_downstream(
         try:
             result = pipeline.run([str(file_path)])
 
-            if not pipeline.event_windowing:
-                logging.warning(f"Pipeline does not have event_windowing enabled")
-                continue
-
             if not isinstance(result, tuple) or len(result) != 4:
                 logging.error(
                     f"Expected 4-tuple from pipeline.run() for {file_path.name}, "
@@ -218,7 +220,7 @@ def main(
     dataset_path: str,
     out_path: str,
     log_path: str,
-    file_extension: str = ".edf",
+    file_extension: Union[str, List[str]] = ".edf",
     batch_size: int = 100,
     n_jobs: int = 1,
     overwrite: bool = False,
@@ -238,7 +240,7 @@ def main(
         Output directory for HDF5 files
     log_path : str
         Path to log file
-    file_extension : str
+    file_extension : str or list of str
         File extension(s) to process
     batch_size : int
         Number of windows per HDF5 file

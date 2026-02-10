@@ -626,15 +626,25 @@ class PretrainPipeline(BasePipeline):
             verbose=True
         )
 
-        # 3. Map event labels to integer class indices
-        labels = [self.label_mapping[desc] for desc in descriptions]
+        # 3. Map event labels to integer class indices (filter unmapped)
+        filtered_windows, filtered_labels, filtered_times = [], [], []
+        for window, desc, time_slice in zip(windows, descriptions, time_slices):
+            if desc not in self.label_mapping:
+                logging.warning(
+                    f"Annotation '{desc}' not in label_mapping "
+                    f"{list(self.label_mapping.keys())}. Skipping window."
+                )
+                continue
+            filtered_windows.append(window)
+            filtered_labels.append(self.label_mapping[desc])
+            filtered_times.append(time_slice)
 
         # 4. Store original info for metadata preservation
         if self.montage is None:
-            for w in windows:
+            for w in filtered_windows:
                 w._original_info = raw.info.copy()
 
-        return windows, labels, time_slices
+        return filtered_windows, filtered_labels, filtered_times
 
     def _extract_windows(self, raw: mne.io.Raw) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]]]:
         """Split raw into windows or return full file."""

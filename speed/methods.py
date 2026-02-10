@@ -300,7 +300,7 @@ class PreprocessMethods:
             
             for line_freq in line_freqs:
                 if line_freq < nyquist:
-                    if effective_lp_freq is not None and line_freq < effective_lp_freq:
+                    if effective_lp_freq is not None and line_freq >= effective_lp_freq:
                         continue
                     raw._data = dss_line_iter(raw._data.T, line_freq, sfreq)[0].T
         

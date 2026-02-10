@@ -106,8 +106,8 @@ def parse_chbmit_summary(
 
     # Extract seizure start and end times
     seizures = []
-    start_times = re.findall(r'Seizure Start Time:\s*(\d+)\s*seconds', file_section)
-    end_times = re.findall(r'Seizure End Time:\s*(\d+)\s*seconds', file_section)
+    start_times = re.findall(r'Seizure\s*\d*\s*Start Time:\s*(\d+)\s*seconds', file_section)
+    end_times = re.findall(r'Seizure\s*\d*\s*End Time:\s*(\d+)\s*seconds', file_section)
 
     for start, end in zip(start_times, end_times):
         onset = float(start)
