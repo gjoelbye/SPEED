@@ -6,9 +6,12 @@ This module provides parsers for dataset-specific annotation formats:
 - CHBMIT: Seizure annotations from summary text files
 """
 
+import logging
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import List, Tuple, Optional
 import mne
+import numpy as np
 import re
 
 
@@ -207,41 +210,155 @@ def generate_non_seizure_windows(
     return windows
 
 
-def convert_chbmit_bipolar_to_average(raw: mne.io.Raw) -> mne.io.Raw:
+def _parse_bipolar_name(ch_name: str) -> Optional[Tuple[str, str]]:
     """
-    Convert CHBMIT bipolar montage to average reference.
+    Parse a bipolar channel name into its electrode pair.
 
-    CHBMIT uses bipolar derivations (e.g., 'FP1-F7' represents FP1 referenced
-    to F7). This function converts to common average reference for compatibility
-    with standard montage interpolation.
+    Parameters
+    ----------
+    ch_name : str
+        Channel name (e.g., 'FP1-F7', 'EEG FP1-F7')
+
+    Returns
+    -------
+    pair : tuple of str or None
+        (electrode_a, electrode_b) in uppercase, or None if not bipolar
+    """
+    name = ch_name.strip()
+    # Remove common EEG prefixes
+    for prefix in ('EEG ', 'EEG-'):
+        if name.upper().startswith(prefix):
+            name = name[len(prefix):]
+
+    parts = name.split('-')
+    if len(parts) != 2:
+        return None
+
+    a = parts[0].strip().upper()
+    b = parts[1].strip().upper()
+
+    if not a or not b:
+        return None
+
+    return (a, b)
+
+
+def convert_chbmit_bipolar_to_monopolar(raw: mne.io.Raw) -> mne.io.Raw:
+    """
+    Convert CHBMIT bipolar montage to monopolar (average reference) signals.
+
+    Each bipolar channel 'A-B' records V_A - V_B. This function recovers the
+    monopolar electrode voltages by solving the linear system y = M*x via
+    pseudoinverse, where M is the bipolar mixing matrix.
+
+    The pseudoinverse yields the minimum-norm solution, which is equivalent
+    to average reference (sum of all monopolar signals ≈ 0).
 
     Parameters
     ----------
     raw : mne.io.Raw
-        Raw EEG data with bipolar channel names
+        Raw EEG data with bipolar channel names (e.g., 'FP1-F7').
 
     Returns
     -------
-    raw_avg : mne.io.Raw
-        Raw EEG data with average reference
+    raw_mono : mne.io.Raw
+        Raw EEG data with monopolar channel names in average reference.
 
     Notes
     -----
-    This is a placeholder implementation. The actual conversion requires
-    reconstructing monopolar signals from bipolar derivations, which may not
-    always be possible depending on the bipolar configuration. For CHBMIT,
-    an alternative approach is to work directly with the bipolar montage or
-    use MNE's montage interpolation capabilities.
+    If the bipolar channel graph has disconnected components, the relative
+    scaling between components cannot be determined from the bipolar data alone.
+    For standard CHBMIT (23 channels), FZ/CZ/PZ form a separate component
+    from the other 18 electrodes. The pseudoinverse gives the minimum-norm
+    solution, but the inter-component scaling is approximate. This is typically
+    acceptable for classification tasks, especially after high-pass filtering.
     """
-    # TODO: Implement proper bipolar to average reference conversion
-    # For now, this is a placeholder that sets average reference
-    # The actual implementation should:
-    # 1. Parse channel names to identify electrode pairs
-    # 2. Reconstruct monopolar signals where possible
-    # 3. Set average reference on monopolar signals
+    # 1. Parse bipolar channel names
+    bipolar_channels = []
+    bipolar_indices = []
+    for i, ch_name in enumerate(raw.ch_names):
+        parsed = _parse_bipolar_name(ch_name)
+        if parsed is not None:
+            bipolar_channels.append(parsed)
+            bipolar_indices.append(i)
 
-    # Simple approach: set average reference (may not be mathematically correct)
-    raw_copy = raw.copy()
-    raw_copy.set_eeg_reference('average', projection=False, verbose=False)
+    if len(bipolar_channels) == 0:
+        # No bipolar channels — already monopolar (e.g., chb12).
+        # Return unchanged so the rest of the pipeline can proceed.
+        logging.info(
+            "No bipolar channels found; assuming already monopolar. "
+            f"Channel names: {raw.ch_names[:5]}..."
+        )
+        return raw
 
-    return raw_copy
+    # 2. Identify unique electrodes (preserve discovery order)
+    seen = set()
+    unique_electrodes = []
+    for a, b in bipolar_channels:
+        for electrode in (a, b):
+            if electrode not in seen:
+                seen.add(electrode)
+                unique_electrodes.append(electrode)
+
+    n_bipolar = len(bipolar_channels)
+    n_mono = len(unique_electrodes)
+    electrode_to_idx = {e: i for i, e in enumerate(unique_electrodes)}
+
+    # 3. Build bipolar mixing matrix M: shape (n_bipolar, n_mono)
+    #    Row i has +1 at electrode_a's column, -1 at electrode_b's column
+    M = np.zeros((n_bipolar, n_mono))
+    for row, (a, b) in enumerate(bipolar_channels):
+        M[row, electrode_to_idx[a]] = 1.0
+        M[row, electrode_to_idx[b]] = -1.0
+
+    # 4. Check graph connectivity — disconnected components introduce
+    #    reconstruction ambiguity (relative scaling between components is lost)
+    adj = defaultdict(set)
+    for a, b in bipolar_channels:
+        adj[a].add(b)
+        adj[b].add(a)
+
+    visited = set()
+    components = []
+    for node in unique_electrodes:
+        if node not in visited:
+            comp = []
+            queue = deque([node])
+            while queue:
+                n = queue.popleft()
+                if n not in visited:
+                    visited.add(n)
+                    comp.append(n)
+                    queue.extend(nb for nb in adj[n] if nb not in visited)
+            components.append(comp)
+
+    if len(components) > 1:
+        comp_strs = [', '.join(c) for c in components]
+        logging.warning(
+            f"Bipolar graph has {len(components)} disconnected components. "
+            f"Relative scaling between components is ambiguous. "
+            f"Components: [{'] / ['.join(comp_strs)}]"
+        )
+
+    # 5. Compute pseudoinverse and recover monopolar signals
+    M_pinv = np.linalg.pinv(M)  # shape (n_mono, n_bipolar)
+    bipolar_data = raw.get_data(picks=bipolar_indices)  # (n_bipolar, n_times)
+    monopolar_data = M_pinv @ bipolar_data               # (n_mono, n_times)
+
+    # 6. Create new Raw object with monopolar channels
+    info = mne.create_info(
+        ch_names=unique_electrodes,
+        sfreq=raw.info['sfreq'],
+        ch_types='eeg'
+    )
+    raw_mono = mne.io.RawArray(monopolar_data, info, verbose=False)
+
+    # 7. Preserve annotations
+    if raw.annotations is not None and len(raw.annotations) > 0:
+        raw_mono.set_annotations(raw.annotations)
+
+    return raw_mono
+
+
+# Backward compatibility alias
+convert_chbmit_bipolar_to_average = convert_chbmit_bipolar_to_monopolar

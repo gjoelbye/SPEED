@@ -9,7 +9,7 @@ from typing import Tuple, List, Optional, Dict, Union
 
 from speed.utils import split_raw, split_raw_annotations, load_montage
 from speed.methods import PreprocessMethods
-from speed.annotations import parse_chbmit_summary, generate_non_seizure_windows
+from speed.annotations import parse_chbmit_summary, generate_non_seizure_windows, convert_chbmit_bipolar_to_monopolar
 
 
 class Pipeline(ABC):
@@ -381,7 +381,7 @@ class PretrainPipeline(BasePipeline):
                 orig_info = raw_orig.info.copy() if self.preserve_metadata else None
                 orig_annot = raw_orig.annotations.copy() if self.preserve_metadata and raw_orig.annotations else None
 
-                self._preprocess_channels(raw_orig, src_path)
+                raw_orig = self._preprocess_channels(raw_orig, src_path)
 
                 if not self._check_duration(raw_orig, src_path):
                     continue
@@ -474,8 +474,8 @@ class PretrainPipeline(BasePipeline):
             orig_info = raw.info.copy() if self.preserve_metadata else None
             orig_annot = raw.annotations.copy() if self.preserve_metadata and raw.annotations else None
             
-            self._preprocess_channels(raw, src_path)
-            
+            raw = self._preprocess_channels(raw, src_path)
+
             # Run quality check first (if needed for metrics or skip logic)
             quality_passed = True
             quality_metrics = None
@@ -530,23 +530,37 @@ class PretrainPipeline(BasePipeline):
             logging.warning(f"Unsupported file type: {suffix}. Skipping {src_path.stem}")
             return None
     
-    def _preprocess_channels(self, raw: mne.io.Raw, src_path: Path):
-        """Apply initial channel preprocessing: removal, renaming, montage."""
+    def _preprocess_channels(self, raw: mne.io.Raw, src_path: Path) -> mne.io.Raw:
+        """Apply initial channel preprocessing: removal, renaming, montage.
+
+        Returns the (potentially replaced) raw object.
+        """
+        # Bipolar-to-monopolar conversion for CHBMIT
+        # Must happen before standardize_channel_names and set_montage
+        if self.annotation_format == 'chbmit':
+            raw = convert_chbmit_bipolar_to_monopolar(raw)
+            logging.info(
+                f"File: {src_path.stem}. Converted bipolar to "
+                f"{len(raw.ch_names)} monopolar channels."
+            )
+
         if self.channels_to_remove:
             dropped = self._drop_channels_manually(raw)
             if dropped:
                 logging.info(f"File: {src_path.stem}. Manually dropped {len(dropped)} channels.")
-        
+
         if self.channels_rename:
             raw.rename_channels(self.channels_rename)
             logging.info(f"File: {src_path.stem}. Renamed channels.")
-        
+
         if self.standardize_channel_names:
             self._to_standard_names(raw)
-        
+
         if self.montage is not None:
             dropped = self._set_montage(raw)
             logging.info(f"File: {src_path.stem}. Dropped {len(dropped)} channels when setting montage.")
+
+        return raw
     
     def _check_duration(self, raw: mne.io.Raw, src_path: Path) -> bool:
         """Check if file meets minimum duration requirements."""
