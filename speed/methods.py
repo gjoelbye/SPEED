@@ -122,8 +122,21 @@ class PreprocessMethods:
         noisychannels.find_bad_by_nan_flat()
         
         # Apply simple filtering for metric calculation
-        raw.notch_filter(line_freqs, verbose=False)
-        raw.filter(hp_freq, lp_freq, verbose=False)
+        # Cap filter frequencies to Nyquist frequency
+        sfreq = raw.info['sfreq']
+        nyquist = sfreq / 2.0
+        
+        # Filter line frequencies that are below Nyquist
+        valid_line_freqs = [f for f in line_freqs if f < nyquist]
+        if valid_line_freqs:
+            raw.notch_filter(valid_line_freqs, verbose=False)
+        
+        # Cap filter frequencies to be less than Nyquist
+        effective_hp_freq = hp_freq if hp_freq is None or hp_freq < nyquist else None
+        effective_lp_freq = lp_freq if lp_freq is None or lp_freq < nyquist else nyquist * 0.95
+        
+        if effective_hp_freq is not None or effective_lp_freq is not None:
+            raw.filter(effective_hp_freq, effective_lp_freq, verbose=False)
         
         # Calculate quality metrics
         oha = np.mean(np.abs(raw._data) > oha_threshold)
@@ -277,17 +290,22 @@ class PreprocessMethods:
         sfreq = raw.info['sfreq']
         nyquist = sfreq / 2.0
         
+        # Cap filter frequencies to Nyquist
+        effective_hp_freq = min(hp_freq, nyquist * 0.95) if hp_freq is not None else None
+        effective_lp_freq = min(lp_freq, nyquist * 0.95) if lp_freq is not None else None
+        
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             if do_detrend:
                 raw._data = detrend(raw._data.T, 1)[0].T
             
             for line_freq in line_freqs:
                 if line_freq < nyquist:
-                    if lp_freq is not None and line_freq < lp_freq:
+                    if effective_lp_freq is not None and line_freq < effective_lp_freq:
                         continue
                     raw._data = dss_line_iter(raw._data.T, line_freq, sfreq)[0].T
         
-        raw.filter(hp_freq, lp_freq, verbose=False)
+        if effective_hp_freq is not None or effective_lp_freq is not None:
+            raw.filter(effective_hp_freq, effective_lp_freq, verbose=False)
     
     # =========================================================================
     # ICA Artifact Rejection

@@ -188,25 +188,29 @@ def split_raw_annotations(
     sfreq = raw.info['sfreq']
     montage = raw.get_montage()
     windows, time_slices, descriptions = [], [], []
-    
+
     for ann in raw.annotations:
-        onset, duration, description, _ = ann.values()
+        # MNE annotations: extract onset, duration, description safely
+        onset = ann['onset']
+        duration = ann['duration']
+        description = ann['description']
+
         if description not in labels:
             continue
-        
+
         start = round((onset + tmin) * sfreq)
         end = start + round(tlen * sfreq)
-        
+
         if start < 0 or end > raw.n_times:
             if verbose:
                 print(f'Skipping {description} at {onset:.2f} s')
             continue
-        
+
         data, times = raw[:, start:end]
         windows.append(_create_window_raw(data, raw, montage))
         time_slices.append((times[0], times[-1]))
         descriptions.append(description)
-    
+
     return windows, time_slices, descriptions
 
 
@@ -272,6 +276,71 @@ def save_hdf5(
         f.attrs["file_idxs"] = indices
         f.attrs["time_slices"] = times
         f.create_dataset("data", data=np.array([r._data for r in raws]), dtype='float32')
+
+
+def save_hdf5_with_labels(
+    raws: List[mne.io.Raw],
+    labels: List[int],
+    label_descriptions: List[str],
+    src_paths: List[Path],
+    times: List[Tuple[float, float]],
+    indices: List[int],
+    dest_path: Path,
+    quality_metrics: Optional[List[Dict]] = None
+) -> None:
+    """
+    Save preprocessed windows with labels to HDF5 for downstream tasks.
+
+    HDF5 Structure:
+        data: (N, C, T) - EEG windows
+        labels: (N,) - integer class labels
+        file_idxs: (N,) - source file index
+        files: (F,) - source filenames
+        time_slices: (N, 2) - (start, end) times
+        attrs['descriptions']: label descriptions
+        attrs['quality_metrics']: optional quality data
+
+    Parameters
+    ----------
+    raws : List[mne.io.Raw]
+        Preprocessed raw objects
+    labels : List[int]
+        Integer class labels for each window
+    label_descriptions : List[str]
+        String descriptions for each label class
+    src_paths : List[Path]
+        Source file paths
+    times : List[Tuple[float, float]]
+        (start_time, end_time) for each window
+    indices : List[int]
+        Index of source file for each window
+    dest_path : Path
+        Output HDF5 file path
+    quality_metrics : List[Dict], optional
+        Quality metrics for each window
+    """
+    # Convert to numpy arrays
+    data = np.array([r._data for r in raws], dtype='float32')
+    labels_arr = np.array(labels, dtype=np.int32)
+    file_idxs_arr = np.array(indices, dtype=np.int32)
+    time_slices_arr = np.array(times, dtype=np.float32)
+    files_arr = np.array([p.stem for p in src_paths], dtype=h5py.string_dtype())
+
+    # Save to HDF5
+    with h5py.File(dest_path, "w") as f:
+        # Main datasets (matching HDF5CombinerDownstream format)
+        f.create_dataset("data", data=data, dtype='float32', fletcher32=True)
+        f.create_dataset("labels", data=labels_arr, dtype=np.int32, fletcher32=True)
+        f.create_dataset("file_idxs", data=file_idxs_arr, dtype=np.int32, fletcher32=True)
+        f.create_dataset("files", data=files_arr, dtype=h5py.string_dtype())
+        f.create_dataset("time_slices", data=time_slices_arr, dtype=np.float32, fletcher32=True)
+
+        # Attributes
+        f.attrs['descriptions'] = label_descriptions
+
+        # Optional quality metrics
+        if quality_metrics is not None:
+            f.attrs['quality_metrics'] = str(quality_metrics)
 
 
 def _round_to_edf8(x: float) -> float:

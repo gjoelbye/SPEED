@@ -7,8 +7,9 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Tuple, List, Optional, Dict, Union
 
-from speed.utils import split_raw, load_montage
+from speed.utils import split_raw, split_raw_annotations, load_montage
 from speed.methods import PreprocessMethods
+from speed.annotations import parse_chbmit_summary, generate_non_seizure_windows
 
 
 class Pipeline(ABC):
@@ -283,40 +284,75 @@ class BasePipeline(Pipeline):
 class PretrainPipeline(BasePipeline):
     """
     Main preprocessing pipeline for EEG data.
-    
+
     Supports configurable preprocessing with quality checking, ICA artifact
     rejection, montage handling, and flexible channel management.
-    
-    Can operate in two modes:
+
+    Can operate in three modes:
     - Batch mode (default): Process multiple files, return windows for HDF5 batching
     - Single-file mode: Process one file at a time with metadata preservation
-    
+    - Event-based mode: Extract event-locked windows with labels for downstream tasks
+
     Parameters
     ----------
     All parameters from BasePipeline, plus:
-    
+
     preserve_metadata : bool
         If True, restore original metadata (subject info, dates, annotations)
         after preprocessing. Useful for downstream tasks.
+    event_windowing : bool
+        If True, use event-based windowing instead of fixed windowing.
+    event_labels : list of str, optional
+        Labels to extract (e.g., ['T1', 'T2', 'T3', 'T4'] for EEGMMIDB).
+    event_tmin : float
+        Window start relative to event onset in seconds.
+    event_tlen : float
+        Window length in seconds.
+    label_mapping : dict, optional
+        Map event labels to integer class indices (e.g., {'T1': 0, 'T2': 1}).
+    annotation_format : str
+        Annotation format: 'eegmmidb', 'chbmit', or 'auto'.
     """
-    
-    def __init__(self, preserve_metadata: bool = False, **kwargs):
+
+    def __init__(
+        self,
+        preserve_metadata: bool = False,
+        event_windowing: bool = False,
+        event_labels: Optional[List[str]] = None,
+        event_tmin: float = 0.0,
+        event_tlen: float = 5.0,
+        label_mapping: Optional[Dict[str, int]] = None,
+        annotation_format: str = "auto",
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.preserve_metadata = preserve_metadata
+        self.event_windowing = event_windowing
+        self.event_labels = event_labels or []
+        self.event_tmin = event_tmin
+        self.event_tlen = event_tlen
+        self.label_mapping = label_mapping or {}
+        self.annotation_format = annotation_format
     
-    def __call__(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
+    def __call__(self, src_paths: List[str]) -> Union[
+        Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]],
+        Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int], List[int]]
+    ]:
         """Process a batch of files and return preprocessed windows."""
         return self.run(src_paths)
     
-    def run(self, src_paths: List[str]) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]]:
+    def run(self, src_paths: List[str]) -> Union[
+        Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]],
+        Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int], List[int]]
+    ]:
         """
         Load and preprocess EEG files (batch mode).
-        
+
         Parameters
         ----------
         src_paths : list of str or Path
             Paths to source EEG files (.edf, .bdf, or .set).
-        
+
         Returns
         -------
         raws : list of mne.io.Raw
@@ -325,39 +361,47 @@ class PretrainPipeline(BasePipeline):
             (start_time, end_time) for each window.
         indices : list of int
             Index of source file for each window.
+        labels : list of int (only if event_windowing=True)
+            Integer class labels for each window.
         """
         src_paths = [Path(p) for p in src_paths]
         logging.debug(f"Loading {len(src_paths)} files...")
-        
+
         raws, times, indices = [], [], []
+        labels = [] if self.event_windowing else None
         original_infos = []  # Store for metadata preservation
-        
+
         for i, src_path in enumerate(src_paths):
             try:
                 raw_orig = self._load_raw_file(src_path)
                 if raw_orig is None:
                     continue
-                
+
                 # Store original info if preserving metadata
                 orig_info = raw_orig.info.copy() if self.preserve_metadata else None
                 orig_annot = raw_orig.annotations.copy() if self.preserve_metadata and raw_orig.annotations else None
-                
+
                 self._preprocess_channels(raw_orig, src_path)
-                
+
                 if not self._check_duration(raw_orig, src_path):
                     continue
-                
-                windows, window_times = self._extract_windows(raw_orig)
-                
+
+                # Extract windows (event-based or fixed)
+                if self.event_windowing:
+                    windows, window_labels, window_times = self._extract_event_windows(raw_orig, src_path)
+                    labels.extend(window_labels)
+                else:
+                    windows, window_times = self._extract_windows(raw_orig)
+
                 raws.extend(windows)
                 times.extend(window_times)
                 indices.extend([i] * len(windows))
                 original_infos.extend([(orig_info, orig_annot)] * len(windows))
-                
+
             except Exception as e:
                 logging.error(f"Dropping file: {src_path.stem}. Error: {e}")
                 continue
-        
+
         total_windows = len(raws)
         logging.debug(f"Total windows: {total_windows}")
         
@@ -366,7 +410,7 @@ class PretrainPipeline(BasePipeline):
             end_time = round(times[i][1], 1)
             filename = src_paths[indices[i]]
             orig_info, orig_annot = original_infos[i] if self.preserve_metadata else (None, None)
-            
+
             try:
                 raws[i] = self._run_single(raws[i], start_time, end_time, filename, orig_info, orig_annot)
             except Exception as e:
@@ -375,16 +419,20 @@ class PretrainPipeline(BasePipeline):
                     f"Error: {e}\n{traceback.format_exc()}"
                 )
                 raws[i] = None
-            
+
             if (i + 1) % 10 == 0:
                 logging.debug(f"Processed {i + 1}/{total_windows} windows.")
-        
+
         mask = [raw is not None for raw in raws]
         raws = [r for r, m in zip(raws, mask) if m]
         times = [t for t, m in zip(times, mask) if m]
         indices = [idx for idx, m in zip(indices, mask) if m]
-        
-        return raws, times, indices
+
+        if self.event_windowing:
+            labels = [l for l, m in zip(labels, mask) if m]
+            return raws, times, indices, labels
+        else:
+            return raws, times, indices
     
     def process_single(
         self,
@@ -512,18 +560,94 @@ class PretrainPipeline(BasePipeline):
                 return False
         return True
     
+    def _extract_event_windows(
+        self,
+        raw: mne.io.Raw,
+        src_path: Path
+    ) -> Tuple[List[mne.io.Raw], List[int], List[Tuple[float, float]]]:
+        """
+        Extract event-locked windows with labels.
+
+        Parameters
+        ----------
+        raw : mne.io.Raw
+            Preprocessed raw EEG data
+        src_path : Path
+            Path to source file (for annotation loading)
+
+        Returns
+        -------
+        windows : List[mne.io.Raw]
+            List of windowed Raw objects
+        labels : List[int]
+            List of integer class labels
+        time_slices : List[Tuple[float, float]]
+            List of (start, end) time tuples
+        """
+        # 1. Load annotations based on format
+        if self.annotation_format == 'eegmmidb':
+            # EEGMMIDB uses EDF+ format — annotations (T0, T1, T2, etc.) are
+            # already embedded in the file and loaded into raw.annotations by
+            # _load_raw_file(). No need to re-read them.
+            pass
+
+        elif self.annotation_format == 'chbmit':
+            # Parse seizure events from summary file
+            summary_file = src_path.parent / f"{src_path.parent.name}-summary.txt"
+
+            if not summary_file.exists():
+                logging.warning(f"Summary file not found: {summary_file}")
+                return [], [], []
+
+            seizure_events = parse_chbmit_summary(summary_file, src_path.name)
+
+            # Generate non-seizure windows
+            recording_duration = raw.times[-1]
+            non_seizure_events = generate_non_seizure_windows(
+                recording_duration,
+                seizure_events,
+                window_length=self.event_tlen,
+                stride=self.event_tlen,  # Non-overlapping
+                margin=60.0
+            )
+
+            # Add all events to annotations
+            for onset, duration in seizure_events:
+                raw.annotations.append(onset, duration, 'seizure')
+            for onset, label in non_seizure_events:
+                raw.annotations.append(onset, self.event_tlen, label)
+
+        # 2. Extract windows using split_raw_annotations utility
+        windows, time_slices, descriptions = split_raw_annotations(
+            raw,
+            labels=self.event_labels,
+            tmin=self.event_tmin,
+            tlen=self.event_tlen,
+            verbose=True
+        )
+
+        # 3. Map event labels to integer class indices
+        labels = [self.label_mapping[desc] for desc in descriptions]
+
+        # 4. Store original info for metadata preservation
+        if self.montage is None:
+            for w in windows:
+                w._original_info = raw.info.copy()
+
+        return windows, labels, time_slices
+
     def _extract_windows(self, raw: mne.io.Raw) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]]]:
         """Split raw into windows or return full file."""
         if self.window_length is None:
             raw._original_info = raw.info.copy()
             return [raw], [(raw.times[0], raw.times[-1])]
-        
+
         windows, times = self._split_raw(raw)
-        
+
         if self.montage is None:
             for w in windows:
                 w._original_info = raw.info.copy()
-        
+
         return windows, times
     
     def _run_single(
