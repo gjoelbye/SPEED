@@ -195,7 +195,9 @@ def split_raw_annotations(
         duration = ann['duration']
         description = ann['description']
 
-        if description not in labels:
+        if labels and description not in labels:
+            continue
+        if not labels and description.startswith('BAD'):
             continue
 
         start = round((onset + tmin) * sfreq)
@@ -280,7 +282,7 @@ def save_hdf5(
 
 def save_hdf5_with_labels(
     raws: List[mne.io.Raw],
-    labels: List[int],
+    labels,
     label_descriptions: List[str],
     src_paths: List[Path],
     times: List[Tuple[float, float]],
@@ -293,7 +295,7 @@ def save_hdf5_with_labels(
 
     HDF5 Structure:
         data: (N, C, T) - EEG windows
-        labels: (N,) - integer class labels
+        labels: (N,) or (N, T) - integer class labels or float regression targets
         file_idxs: (N,) - source file index
         files: (F,) - source filenames
         time_slices: (N, 2) - (start, end) times
@@ -304,8 +306,9 @@ def save_hdf5_with_labels(
     ----------
     raws : List[mne.io.Raw]
         Preprocessed raw objects
-    labels : List[int]
-        Integer class labels for each window
+    labels : list of int, float, or list/array
+        Class labels (int) or regression targets (float). For multi-target
+        regression, each element can be a list/array of floats.
     label_descriptions : List[str]
         String descriptions for each label class
     src_paths : List[Path]
@@ -321,7 +324,13 @@ def save_hdf5_with_labels(
     """
     # Convert to numpy arrays
     data = np.array([r._data for r in raws], dtype='float32')
-    labels_arr = np.array(labels, dtype=np.int32)
+    labels_arr = np.array(labels)
+    # Auto-detect dtype: float for regression, int for classification
+    if labels_arr.dtype.kind == 'f':
+        labels_dtype = np.float32
+    else:
+        labels_dtype = np.int32
+    labels_arr = labels_arr.astype(labels_dtype)
     file_idxs_arr = np.array(indices, dtype=np.int32)
     time_slices_arr = np.array(times, dtype=np.float32)
     files_arr = np.array([p.stem for p in src_paths], dtype=h5py.string_dtype())
@@ -330,7 +339,7 @@ def save_hdf5_with_labels(
     with h5py.File(dest_path, "w") as f:
         # Main datasets (matching HDF5CombinerDownstream format)
         f.create_dataset("data", data=data, dtype='float32', fletcher32=True)
-        f.create_dataset("labels", data=labels_arr, dtype=np.int32, fletcher32=True)
+        f.create_dataset("labels", data=labels_arr, dtype=labels_dtype, fletcher32=True)
         f.create_dataset("file_idxs", data=file_idxs_arr, dtype=np.int32, fletcher32=True)
         f.create_dataset("files", data=files_arr, dtype=h5py.string_dtype())
         f.create_dataset("time_slices", data=time_slices_arr, dtype=np.float32, fletcher32=True)

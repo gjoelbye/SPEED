@@ -124,3 +124,5 @@ cython_debug/
 pyproject.toml
 chb01/
 .DS_store
+docs/
+logs/

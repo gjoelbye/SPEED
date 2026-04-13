@@ -1,0 +1,107 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - ISRUC Sleep Staging
+# =============================================================================
+# 5-class sleep staging: W, N1, N2, N3, REM
+# Annotations from companion text files (one label per 30s epoch per line)
+# Source: ISRUC-SLEEP dataset (sleeptight.isr.uc.pt)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_isruc.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['W', 'N1', 'N2', 'N3', 'R']
+    event_tmin: 0.0
+    event_tlen: 30.0                        # 30-second sleep epochs
+    label_mapping:
+      W: 0
+      N1: 1
+      N2: 2
+      N3: 3
+      R: 4
+    annotation_format: "isruc"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # Portugal — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 4
+    montage: tuh
+    # 6 EEG channels (referential montage, renamed to standard 10-20)
+    channels: [F3, C3, O1, F4, C4, O2]
+    channels_to_remove: null
+    channels_rename:
+      F3-A2: F3
+      C3-A2: C3
+      O1-A2: O1
+      F4-A1: F4
+      C4-A1: C4
+      O2-A1: O2
+    standardize_channel_names: false  # Referential names break heuristic_resolution
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: false                # Too few channels for RANSAC
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/isruc
+out_path: /scratch/agjma/SPEED/Processed/isruc
+log_path: /scratch/agjma/SPEED/Processed/isruc/logs/isruc_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"               # ISRUC .rec files renamed to .edf
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 100 subjects (Subgroup I used in CBraMod benchmark)
+# - Original sfreq: 200 Hz (already at target)
+# - 6 EEG channels: F3, C3, O1, F4, C4, O2
+# - 89,240 total 30-second epochs
+# - Train: subjects 1-80 | Val: subjects 81-90 | Test: subjects 91-100
+# - Needs download from ISRUC website

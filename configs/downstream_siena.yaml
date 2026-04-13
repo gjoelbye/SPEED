@@ -1,0 +1,99 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - Siena Scalp EEG (Seizure Detection)
+# =============================================================================
+# Binary classification: seizure vs non-seizure
+# Annotations from Seizures-list-PNxx.txt (clock-time seizure onset/end)
+# Source: PhysioNet (siena-scalp-eeg), used in EEG-FM-Bench
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_siena.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['seizure', 'non-seizure']
+    event_tmin: 0.0
+    event_tlen: 10.0
+    label_mapping:
+      non-seizure: 0
+      seizure: 1
+    annotation_format: "siena"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # Italy — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: tuh
+    # 19 standard 10-20 channels (EEG prefix stripped by standardize)
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: true  # Strips EEG prefix, T3→T7, T4→T8
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/siena-scalp-eeg/1.0.0
+out_path: /scratch/agjma/SPEED/Processed/siena
+log_path: /scratch/agjma/SPEED/Processed/siena/logs/siena_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 14 adult subjects (ages 20-71), 47 seizure events
+# - 29 EEG channels + EKG/SPO2/HR (non-EEG dropped by montage) → 19 standard
+# - Original sfreq: 512 Hz → resampled to 200 Hz
+# - Monopolar 10-20 montage (no bipolar conversion needed, unlike CHB-MIT)
+# - Seizure annotations as clock times in Seizures-list-PNxx.txt
+# - Used in EEG-FM-Bench benchmark (2025)
+# - Complements CHB-MIT (adult vs pediatric, EU vs US)

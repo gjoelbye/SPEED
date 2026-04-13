@@ -1,0 +1,102 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - MoBI Gait Prediction
+# =============================================================================
+# Multi-target regression: 12 joint-angle targets (bilateral hip, knee, ankle)
+# Requires conversion to EDF first: python scripts/convert_mobi.py
+# Source: MoBI dataset (LaBraM benchmark)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_mobi.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+    task_type: regression
+
+    # --- Event-Based Windowing ---
+    # After conversion, annotations are embedded as 'gait_<v1>_<v2>_..._<v12>'
+    event_windowing: true
+    event_labels: []                         # Match all annotations
+    event_tmin: 0.0
+    event_tlen: 2.0
+    label_mapping: {}
+    annotation_format: "eegmmidb"    # Annotations embedded in EDF by conversion script
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: standard_1005
+    # 60 EEG channels (ActiCap layout, Fpz is ground — not recorded)
+    channels: [Fp1, Fp2, AF7, AF3, AFz, AF4, AF8, F7, F5, F3, F1, Fz, F2,
+               F4, F6, F8, FT7, FC5, FC3, FC1, FCz, FC2, FC4, FC6, FT8, T7, C5,
+               C3, C1, Cz, C2, C4, C6, T8, TP7, CP5, CP3, CP1, CPz, CP2, CP4,
+               CP6, TP8, P7, P5, P3, P1, Pz, P2, P4, P6, P8, PO7, PO3, POz,
+               PO4, PO8, O1, Oz, O2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: false
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/mobi_edf
+out_path: /scratch/agjma/SPEED/Processed/mobi
+log_path: /scratch/agjma/SPEED/Processed/mobi/logs/mobi_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 8 subjects, 575,830 total 2-second samples (50ms stride)
+# - Multi-target regression: 12 joint angles (hip, knee, ankle, bilateral)
+# - Targets normalized by dividing by 90 degrees
+# - Original: 100 Hz → upsampled to 200 Hz
+# - 60 EEG channels (BioSemi)
+# - Train: first 10 min of 15-min sessions | Val: last 5 min | Test: separate 5-min session

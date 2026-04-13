@@ -21,7 +21,7 @@ pipeline:
     event_windowing: true
     event_labels: ['seizure', 'non-seizure']
     event_tmin: 0.0                          # Start at event onset
-    event_tlen: 60.0                         # 60-second windows
+    event_tlen: 10.0                         # 10-second windows
     label_mapping:
       non-seizure: 0
       seizure: 1
@@ -31,8 +31,8 @@ pipeline:
     window_length: null
     shift_seconds: null
 
-    # Target sampling frequency (Hz) - CHBMIT is already 256 Hz
-    sfreq: 256.0
+    # Target sampling frequency (Hz) - CHBMIT native 256 Hz, resample to 200 Hz
+    sfreq: 200.0
 
     # --- Filter Settings ---
     hp_freq: 0.5                   # High-pass filter cutoff (Hz)
@@ -49,10 +49,11 @@ pipeline:
     # --- Channel Configuration ---
     min_nchans: 10
 
-    # Montage: Convert CHBMIT bipolar to standard 19 channels
+    # Bipolar-to-monopolar conversion
     # CHBMIT uses bipolar montage (e.g., FP1-F7, F7-T7, etc.)
-    # This will interpolate to standard electrode positions
-    montage: standard_1005
+    # This converts to standard monopolar electrode positions
+    bipolar_to_monopolar: true
+    montage: tuh
 
     # Required output channels (standard 19 channels)
     channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
@@ -86,9 +87,9 @@ pipeline:
 # =============================================================================
 # Dataset Configuration
 # =============================================================================
-dataset_path: /dtu-compute/EEG_at_scale/physionet.org/files/chbmit/1.0.0
-out_path: /scratch/agjma/CHBMIT_processed
-log_path: /scratch/agjma/CHBMIT_processed/logs/chbmit_log.txt
+dataset_path: /scratch/agjma/SPEED/Original/chbmit
+out_path: /scratch/agjma/SPEED/Processed/chbmit
+log_path: /scratch/agjma/SPEED/Processed/chbmit/logs/chbmit_log.txt
 
 
 # =============================================================================
@@ -101,7 +102,7 @@ file_extension: ".edf"        # Extension(s): ".edf", ".bdf", ".set", or list
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR
 
 # Processing batch size
-batch_size: 50  # Fewer windows per HDF5 file due to larger window size (60s)
+batch_size: 100  # Windows per HDF5 file (10s windows)
 
 
 # =============================================================================

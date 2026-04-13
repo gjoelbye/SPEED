@@ -1,0 +1,123 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - BCIC-IV-2a Motor Imagery
+# =============================================================================
+# 4-class motor imagery: left hand, right hand, both feet, tongue
+# Events from GDF event markers (event codes 769-772)
+# Source: BCI Competition IV Dataset 2a (BNCI Horizon 2020)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_bcic_iv_2a.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['left_hand', 'right_hand', 'both_feet', 'tongue']
+    event_tmin: 2.0                          # MI starts 2s after cue onset
+    event_tlen: 4.0                          # 4-second MI period (2s-6s post cue)
+    label_mapping:
+      left_hand: 0
+      right_hand: 1
+      both_feet: 2
+      tongue: 3
+    annotation_format: "bcic_iv_2a"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # Austria — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: standard_1005
+    # 22 EEG channels (3 EOG channels excluded by montage)
+    channels: [Fz, FC3, FC1, FCz, FC2, FC4, C5, C3, C1, Cz, C2, C4, C6,
+               CP3, CP1, CPz, CP2, CP4, P1, Pz, P2, POz]
+    channels_to_remove: null
+    channels_rename:
+      EEG-Fz: Fz
+      EEG-0: FC3
+      EEG-1: FC1
+      EEG-2: FCz
+      EEG-3: FC2
+      EEG-4: FC4
+      EEG-5: C5
+      EEG-C3: C3
+      EEG-6: C1
+      EEG-Cz: Cz
+      EEG-7: C2
+      EEG-C4: C4
+      EEG-8: C6
+      EEG-9: CP3
+      EEG-10: CP1
+      EEG-11: CPz
+      EEG-12: CP2
+      EEG-13: CP4
+      EEG-14: P1
+      EEG-Pz: Pz
+      EEG-15: P2
+      EEG-16: POz
+    standardize_channel_names: false
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/bcic_iv_2a
+out_path: /scratch/agjma/SPEED/Processed/bcic_iv_2a
+log_path: /scratch/agjma/SPEED/Processed/bcic_iv_2a/logs/bcic_iv_2a_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".gdf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 9 subjects, each with training + evaluation sessions
+# - 5,088-5,184 total trials (4s MI windows from 2s-6s post cue)
+# - Original sfreq: 250 Hz → resampled to 200 Hz
+# - 22 EEG + 3 EOG channels (EOG dropped by montage)
+# - Train: subjects 1-5 | Val: subjects 6-7 | Test: subjects 8-9
+# - Needs download from BNCI Horizon 2020 or MOABB

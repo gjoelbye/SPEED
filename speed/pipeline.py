@@ -9,7 +9,13 @@ from typing import Tuple, List, Optional, Dict, Union
 
 from speed.utils import split_raw, split_raw_annotations, load_montage
 from speed.methods import PreprocessMethods
-from speed.annotations import parse_chbmit_summary, generate_non_seizure_windows, convert_chbmit_bipolar_to_monopolar
+from speed.annotations import (
+    parse_chbmit_summary, generate_non_seizure_windows,
+    convert_chbmit_bipolar_to_monopolar, generate_tiled_annotations,
+    parse_eegmat_annotations, parse_hmc_sleepscoring, parse_isruc_annotations,
+    parse_mumtaz2016_annotations, parse_tuev_annotations, parse_tuab_annotations,
+    parse_bcic_iv_2a_events, parse_shu_mi_events, parse_siena_seizures,
+)
 
 
 class Pipeline(ABC):
@@ -123,18 +129,21 @@ class BasePipeline(Pipeline):
         use_ransac: bool = True,
         # Channel naming
         standardize_channel_names: bool = False,
+        # Bipolar conversion
+        bipolar_to_monopolar: bool = False,
     ):
         mne.set_log_level('ERROR')
-        
+
         # Validate channels
         if channels is None or len(channels) == 0:
             raise ValueError("channels must be provided as a non-empty list.")
-        
+
         # Channel configuration
         self.channels_rename = channels_rename
         self.channels_to_remove = channels_to_remove
         self.chs = channels
         self.standardize_channel_names = standardize_channel_names
+        self.bipolar_to_monopolar = bipolar_to_monopolar
         
         # Sampling and interpolation
         self.sfreq = sfreq
@@ -321,8 +330,9 @@ class PretrainPipeline(BasePipeline):
         event_labels: Optional[List[str]] = None,
         event_tmin: float = 0.0,
         event_tlen: float = 5.0,
-        label_mapping: Optional[Dict[str, int]] = None,
+        label_mapping: Optional[Dict[str, Union[int, float]]] = None,
         annotation_format: str = "auto",
+        task_type: str = "classification",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -333,6 +343,7 @@ class PretrainPipeline(BasePipeline):
         self.event_tlen = event_tlen
         self.label_mapping = label_mapping or {}
         self.annotation_format = annotation_format
+        self.task_type = task_type
     
     def __call__(self, src_paths: List[str]) -> Union[
         Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]],
@@ -386,17 +397,28 @@ class PretrainPipeline(BasePipeline):
                 if not self._check_duration(raw_orig, src_path):
                     continue
 
-                # Extract windows (event-based or fixed)
                 if self.event_windowing:
-                    windows, window_labels, window_times = self._extract_event_windows(raw_orig, src_path)
+                    # Preprocess full recording first, then slice into event windows
+                    raw_processed = self._run_single(
+                        raw_orig, 0.0, raw_orig.times[-1], src_path,
+                        orig_info, orig_annot
+                    )
+                    if raw_processed is None:
+                        continue
+                    windows, window_labels, window_times = self._extract_event_windows(
+                        raw_processed, src_path
+                    )
                     labels.extend(window_labels)
+                    raws.extend(windows)
+                    times.extend(window_times)
+                    indices.extend([i] * len(windows))
                 else:
+                    # Fixed windowing: slice first, process per-window
                     windows, window_times = self._extract_windows(raw_orig)
-
-                raws.extend(windows)
-                times.extend(window_times)
-                indices.extend([i] * len(windows))
-                original_infos.extend([(orig_info, orig_annot)] * len(windows))
+                    raws.extend(windows)
+                    times.extend(window_times)
+                    indices.extend([i] * len(windows))
+                    original_infos.extend([(orig_info, orig_annot)] * len(windows))
 
             except Exception as e:
                 logging.error(f"Dropping file: {src_path.stem}. Error: {e}")
@@ -404,24 +426,26 @@ class PretrainPipeline(BasePipeline):
 
         total_windows = len(raws)
         logging.debug(f"Total windows: {total_windows}")
-        
-        for i in range(len(raws)):
-            start_time = round(times[i][0], 1)
-            end_time = round(times[i][1], 1)
-            filename = src_paths[indices[i]]
-            orig_info, orig_annot = original_infos[i] if self.preserve_metadata else (None, None)
 
-            try:
-                raws[i] = self._run_single(raws[i], start_time, end_time, filename, orig_info, orig_annot)
-            except Exception as e:
-                logging.error(
-                    f"File: {filename}. Time: {(start_time, end_time)}. "
-                    f"Error: {e}\n{traceback.format_exc()}"
-                )
-                raws[i] = None
+        if not self.event_windowing:
+            # Per-window preprocessing (only for fixed windowing / pretrain mode)
+            for i in range(len(raws)):
+                start_time = round(times[i][0], 1)
+                end_time = round(times[i][1], 1)
+                filename = src_paths[indices[i]]
+                orig_info, orig_annot = original_infos[i] if self.preserve_metadata else (None, None)
 
-            if (i + 1) % 10 == 0:
-                logging.debug(f"Processed {i + 1}/{total_windows} windows.")
+                try:
+                    raws[i] = self._run_single(raws[i], start_time, end_time, filename, orig_info, orig_annot)
+                except Exception as e:
+                    logging.error(
+                        f"File: {filename}. Time: {(start_time, end_time)}. "
+                        f"Error: {e}\n{traceback.format_exc()}"
+                    )
+                    raws[i] = None
+
+                if (i + 1) % 10 == 0:
+                    logging.debug(f"Processed {i + 1}/{total_windows} windows.")
 
         mask = [raw is not None for raw in raws]
         raws = [r for r, m in zip(raws, mask) if m]
@@ -513,7 +537,7 @@ class PretrainPipeline(BasePipeline):
         """Load a raw EEG file based on its extension."""
         suffix = src_path.suffix.lower()
         
-        if suffix == ".edf":
+        if suffix in (".edf", ".rec"):
             return mne.io.read_raw_edf(src_path, preload=True, verbose=False)
         elif suffix == ".bdf":
             return mne.io.read_raw_bdf(src_path, preload=True, verbose=False)
@@ -526,6 +550,8 @@ class PretrainPipeline(BasePipeline):
                     "ignore", message=r".*pymatreader cannot import.*", category=UserWarning
                 )
                 return mne.io.read_raw_eeglab(src_path, preload=True, verbose=False)
+        elif suffix == ".gdf":
+            return mne.io.read_raw_gdf(str(src_path), preload=True, verbose=False)
         else:
             logging.warning(f"Unsupported file type: {suffix}. Skipping {src_path.stem}")
             return None
@@ -535,9 +561,9 @@ class PretrainPipeline(BasePipeline):
 
         Returns the (potentially replaced) raw object.
         """
-        # Bipolar-to-monopolar conversion for CHBMIT
+        # Bipolar-to-monopolar conversion (e.g., CHBMIT, TUEV, TUAB)
         # Must happen before standardize_channel_names and set_montage
-        if self.annotation_format == 'chbmit':
+        if self.bipolar_to_monopolar:
             raw = convert_chbmit_bipolar_to_monopolar(raw)
             logging.info(
                 f"File: {src_path.stem}. Converted bipolar to "
@@ -631,6 +657,70 @@ class PretrainPipeline(BasePipeline):
             for onset, label in non_seizure_events:
                 raw.annotations.append(onset, self.event_tlen, label)
 
+        elif self.annotation_format == 'eegmat':
+            # MentalArithmetic: label from filename, tile into windows
+            events = parse_eegmat_annotations(src_path, self.event_tlen, raw.times[-1])
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'hmc':
+            # HMC: parse companion sleep scoring file
+            events = parse_hmc_sleepscoring(src_path)
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'isruc':
+            # ISRUC: parse companion annotation file
+            events = parse_isruc_annotations(src_path)
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'mumtaz2016':
+            # Mumtaz2016: label from directory structure, tile into windows
+            events = parse_mumtaz2016_annotations(src_path, self.event_tlen, raw.times[-1])
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'tuev':
+            # TUEV: parse .tse annotation files
+            events = parse_tuev_annotations(src_path)
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'tuab':
+            # TUAB: label from directory path, tile into windows
+            events = parse_tuab_annotations(src_path, self.event_tlen, raw.times[-1])
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'bcic_iv_2a':
+            # BCIC-IV-2a: extract GDF motor imagery event markers
+            events = parse_bcic_iv_2a_events(raw)
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'shu_mi':
+            # SHU-MI: parse companion events TSV file
+            events = parse_shu_mi_events(src_path, self.sfreq)
+            for onset, duration, label in events:
+                raw.annotations.append(onset, duration, label)
+
+        elif self.annotation_format == 'siena':
+            # Siena: parse seizure times from Seizures-list-PNxx.txt
+            seizure_events = parse_siena_seizures(src_path)
+            recording_duration = raw.times[-1]
+            non_seizure_events = generate_non_seizure_windows(
+                recording_duration,
+                seizure_events,
+                window_length=self.event_tlen,
+                stride=self.event_tlen,
+                margin=60.0
+            )
+            for onset, duration in seizure_events:
+                raw.annotations.append(onset, duration, 'seizure')
+            for onset, label in non_seizure_events:
+                raw.annotations.append(onset, self.event_tlen, label)
+
         # 2. Extract windows using split_raw_annotations utility
         windows, time_slices, descriptions = split_raw_annotations(
             raw,
@@ -640,39 +730,40 @@ class PretrainPipeline(BasePipeline):
             verbose=True
         )
 
-        # 3. Map event labels to integer class indices (filter unmapped)
+        # 3. Map labels: classification uses label_mapping, regression parses from description
         filtered_windows, filtered_labels, filtered_times = [], [], []
-        for window, desc, time_slice in zip(windows, descriptions, time_slices):
-            if desc not in self.label_mapping:
-                logging.warning(
-                    f"Annotation '{desc}' not in label_mapping "
-                    f"{list(self.label_mapping.keys())}. Skipping window."
-                )
-                continue
-            filtered_windows.append(window)
-            filtered_labels.append(self.label_mapping[desc])
-            filtered_times.append(time_slice)
-
-        # 4. Store original info for metadata preservation
-        if self.montage is None:
-            for w in filtered_windows:
-                w._original_info = raw.info.copy()
+        if self.task_type == 'regression':
+            for window, desc, time_slice in zip(windows, descriptions, time_slices):
+                try:
+                    parts = desc.split('_')
+                    target_values = [float(p) for p in parts[1:]]
+                    if len(target_values) == 1:
+                        target_values = target_values[0]
+                except (ValueError, IndexError):
+                    continue
+                filtered_windows.append(window)
+                filtered_labels.append(target_values)
+                filtered_times.append(time_slice)
+        else:
+            for window, desc, time_slice in zip(windows, descriptions, time_slices):
+                if desc not in self.label_mapping:
+                    logging.warning(
+                        f"Annotation '{desc}' not in label_mapping "
+                        f"{list(self.label_mapping.keys())}. Skipping window."
+                    )
+                    continue
+                filtered_windows.append(window)
+                filtered_labels.append(self.label_mapping[desc])
+                filtered_times.append(time_slice)
 
         return filtered_windows, filtered_labels, filtered_times
 
     def _extract_windows(self, raw: mne.io.Raw) -> Tuple[List[mne.io.Raw], List[Tuple[float, float]]]:
         """Split raw into windows or return full file."""
         if self.window_length is None:
-            raw._original_info = raw.info.copy()
             return [raw], [(raw.times[0], raw.times[-1])]
 
-        windows, times = self._split_raw(raw)
-
-        if self.montage is None:
-            for w in windows:
-                w._original_info = raw.info.copy()
-
-        return windows, times
+        return self._split_raw(raw)
     
     def _run_single(
         self,

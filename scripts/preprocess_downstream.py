@@ -148,8 +148,17 @@ def preprocess_downstream(
         hdf5_path = out_path / f"batch_{batch_id:05d}.hdf5"
 
         if hdf5_path.exists() and not overwrite:
-            logging.info(f"Batch {batch_id}: Already exists, skipping.")
-            return
+            # Verify existing batch is valid and has the expected number of windows
+            try:
+                import h5py
+                with h5py.File(hdf5_path, 'r') as f:
+                    if 'data' in f and f['data'].shape[0] == len(raws):
+                        logging.info(f"Batch {batch_id}: Already exists and valid ({len(raws)} windows), skipping.")
+                        return
+                    else:
+                        logging.warning(f"Batch {batch_id}: Exists but invalid/incomplete. Overwriting.")
+            except Exception:
+                logging.warning(f"Batch {batch_id}: Exists but corrupted. Overwriting.")
 
         label_descriptions = list(pipeline.label_mapping.keys())
 

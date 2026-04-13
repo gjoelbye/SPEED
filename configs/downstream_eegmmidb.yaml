@@ -20,8 +20,8 @@ pipeline:
     # --- Event-Based Windowing (NEW for downstream tasks) ---
     event_windowing: true
     event_labels: ['T1', 'T2', 'T3', 'T4']  # Motor execution: left, right, feet, both fists (exclude T0 rest)
-    event_tmin: -1.0                         # Start 1 second before event onset
-    event_tlen: 6.0                          # Total window length = 6 seconds
+    event_tmin: 0.0                          # Start at event onset
+    event_tlen: 4.0                          # Total window length = 4 seconds (MI period)
     label_mapping:
       T1: 0  # left fist
       T2: 1  # right fist
@@ -35,7 +35,7 @@ pipeline:
     shift_seconds: null
 
     # Target sampling frequency (Hz) after resampling
-    sfreq: 256.0
+    sfreq: 200.0
     
     # --- Filter Settings ---
     hp_freq: 0.5                   # High-pass filter cutoff (Hz). null = skip.
@@ -56,8 +56,12 @@ pipeline:
     # path to .fif file, or null for no montage.
     montage: tuh
     
-    # Required output channels in order (REQUIRED - no default)
-    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    # Required output channels — full 64-channel BCI2000 set (after standardization)
+    channels: [Fc5, Fc3, Fc1, Fcz, Fc2, Fc4, Fc6, C5, C3, C1, Cz, C2, C4, C6,
+               Cp5, Cp3, Cp1, Cpz, Cp2, Cp4, Cp6, Fp1, Fpz, Fp2, Af7, Af3, Afz,
+               Af4, Af8, F7, F5, F3, F1, Fz, F2, F4, F6, F8, Ft7, Ft8, T7, T8,
+               T9, T10, Tp7, Tp8, T5, P5, P3, P1, Pz, P2, P4, P6, T6, Po7, Po3,
+               Poz, Po4, Po8, O1, Oz, O2, Iz]
     
     channels_to_remove: null       # Channels to drop before processing.
     channels_rename: null          # Channel rename mapping {old: new}.
@@ -89,9 +93,9 @@ pipeline:
 # =============================================================================
 # Dataset Configuration
 # =============================================================================
-dataset_path: /dtu-compute/EEG_at_scale/physionet.org/files/eegmmidb/1.0.0
-out_path: /scratch/agjma/MMIDB_processed
-log_path: /scratch/agjma/MMIDB_processed/logs/eegmmidb_log.txt
+dataset_path: /scratch/agjma/SPEED/Original/eegmmidb
+out_path: /scratch/agjma/SPEED/Processed/eegmmidb
+log_path: /scratch/agjma/SPEED/Processed/eegmmidb/logs/eegmmidb_log.txt
 
 
 # =============================================================================
@@ -102,6 +106,7 @@ shuffle_files: false          # Randomly shuffle file order.
 n_jobs: 16                     # Number of parallel workers.
 file_extension: ".edf"        # Extension(s): ".edf", ".bdf", ".set", or list.
 log_level: INFO               # DEBUG, INFO, WARNING, ERROR.
+batch_size: 100
 
 
 # =============================================================================
@@ -109,7 +114,7 @@ log_level: INFO               # DEBUG, INFO, WARNING, ERROR.
 # =============================================================================
 # This config extracts event-locked windows with labels for supervised learning.
 # Output will be batched HDF5 files containing:
-#   - Preprocessed EEG windows (19 channels x 1536 samples)
+#   - Preprocessed EEG windows (64 channels x 800 samples at 200 Hz)
 #   - Integer labels (0-3 for the 4 motor classes)
 #   - Source file metadata and time slices
 

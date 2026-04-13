@@ -1,0 +1,103 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - BCIC2020-IV-3 Imagined Speech
+# =============================================================================
+# 5-class imagined speech/phrase classification
+# Requires conversion from .mat to EDF first: python scripts/convert_bcic2020_iv_3.py
+# Source: BCI Competition 2020 Dataset IV-3
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_bcic2020_iv_3.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['hello', 'help_me', 'stop', 'thank_you', 'yes']
+    event_tmin: 0.0
+    event_tlen: 3.0
+    label_mapping:
+      hello: 0
+      help_me: 1
+      stop: 2
+      thank_you: 3
+      yes: 4
+    annotation_format: "eegmmidb"    # Annotations embedded in EDF by conversion script
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [60.0]              # Korean dataset — 60 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: standard_1005
+    # 64 channels (10-20 extended)
+    channels: [Fp1, Fpz, Fp2, AF7, AF3, AFz, AF4, AF8, F7, F5, F3, F1, Fz, F2,
+               F4, F6, F8, FT7, FC5, FC3, FC1, FCz, FC2, FC4, FC6, FT8, T7, C5,
+               C3, C1, Cz, C2, C4, C6, T8, TP7, CP5, CP3, CP1, CPz, CP2, CP4,
+               CP6, TP8, P7, P5, P3, P1, Pz, P2, P4, P6, P8, PO7, PO3, POz,
+               PO4, PO8, O1, Oz, O2, CB1, CB2, Iz]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: false
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/bcic2020_iv_3/edf
+out_path: /scratch/agjma/SPEED/Processed/bcic2020_iv_3
+log_path: /scratch/agjma/SPEED/Processed/bcic2020_iv_3/logs/bcic2020_iv_3_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 15 subjects, 6,000 total 3-second samples
+# - Original: .mat at 256 Hz → converted to EDF → resampled to 200 Hz
+# - 64 EEG channels (10-20 extended)
+# - Per subject: 60 train + 10 val + 10 test trials per class

@@ -1,0 +1,106 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - HMC Sleep Staging
+# =============================================================================
+# 5-class sleep staging: W, N1, N2, N3, REM
+# Annotations from companion *_sleepscoring.txt files (30s epochs)
+# Source: PhysioNet (hmc-sleep-staging)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream_hmc.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['Sleep stage W', 'Sleep stage N1', 'Sleep stage N2',
+                   'Sleep stage N3', 'Sleep stage R']
+    event_tmin: 0.0
+    event_tlen: 30.0                        # 30-second sleep epochs
+    label_mapping:
+      Sleep stage W: 0
+      Sleep stage N1: 1
+      Sleep stage N2: 2
+      Sleep stage N3: 3
+      Sleep stage R: 4
+    annotation_format: "hmc"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # Netherlands — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 2
+    montage: tuh
+    # 4 EEG channels (mastoid-referenced, renamed to standard names)
+    channels: [F4, C4, O2, C3]
+    channels_to_remove: null
+    channels_rename:
+      EEG F4-M1: F4
+      EEG C4-M1: C4
+      EEG O2-M1: O2
+      EEG C3-M2: C3
+    standardize_channel_names: false  # Manual renaming via channels_rename
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: false                # Too few channels for RANSAC
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/hmc/recordings
+out_path: /scratch/agjma/SPEED/Processed/hmc
+log_path: /scratch/agjma/SPEED/Processed/hmc/logs/hmc_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 151 subjects, ~7 hours per recording
+# - Original sfreq: 256 Hz → resampled to 200 Hz
+# - 4 EEG channels (F4-M1, C4-M1, O2-M1, C3-M2) + EMG, EOG, ECG
+# - EMG/EOG/ECG dropped by montage (not in channels list)
+# - 137,243 total 30-second epochs across all subjects
+# - Partially downloaded — need to download remaining subjects

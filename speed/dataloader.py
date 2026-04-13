@@ -166,7 +166,11 @@ class DownstreamDataset(Dataset):
 
         # Convert to tensors
         data = torch.from_numpy(data).float()
-        label = torch.tensor(label, dtype=torch.long)
+        # Auto-detect regression (float) vs classification (int) labels
+        if isinstance(label, np.floating) or (isinstance(label, np.ndarray) and label.dtype.kind == 'f'):
+            label = torch.tensor(label, dtype=torch.float)
+        else:
+            label = torch.tensor(label, dtype=torch.long)
 
         # Apply transform
         if self.transform:
