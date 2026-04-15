@@ -12,6 +12,20 @@ from speed.utils import (
     DEFAULT_EXCLUDE_PATTERNS,
 )
 from speed.methods import PreprocessMethods
+from speed.dataloader import (
+    DownstreamDataset,
+    subject_wise_split,
+    SUBJECT_EXTRACTORS,
+    get_dataloader,
+    get_weighted_sampler,
+)
+from speed.metrics import (
+    balanced_accuracy,
+    auroc,
+    f1_score,
+    cohens_kappa,
+    classification_report,
+)
 
 __all__ = [
     # Pipelines
@@ -30,4 +44,16 @@ __all__ = [
     "DEFAULT_EXCLUDE_PATTERNS",
     # Methods
     "PreprocessMethods",
+    # Data loading and splitting
+    "DownstreamDataset",
+    "subject_wise_split",
+    "SUBJECT_EXTRACTORS",
+    "get_dataloader",
+    "get_weighted_sampler",
+    # Evaluation metrics
+    "balanced_accuracy",
+    "auroc",
+    "f1_score",
+    "cohens_kappa",
+    "classification_report",
 ]

@@ -1,0 +1,153 @@
+# =============================================================================
+# Pipeline Configuration
+# =============================================================================
+pipeline:
+  class_path: speed.pipeline_unified.PretrainPipeline
+  init_args:
+    # --- Window Settings ---
+    window_length: 60              # Window length in seconds. null = full file.
+    shift_seconds: null            # Window shift for overlap. null = no overlap.
+    sfreq: 256.0                   # Target sampling frequency (Hz).
+    
+    # --- Filter Settings ---
+    hp_freq: 0.5                   # High-pass filter cutoff (Hz). null = skip.
+    lp_freq: 100.0                 # Low-pass filter cutoff (Hz). null = skip.
+    line_freqs: [60.0]             # Power line frequencies to notch filter.
+    
+    # --- ICA Settings ---
+    do_ica: true                   # Whether to run ICA artifact rejection.
+    iclabel_threshold: 0.7         # Probability threshold for component rejection.
+    included_components:           # Component types to keep.
+      - brain
+      - other
+    
+    # --- Channel Configuration ---
+    min_nchans: 10                 # Minimum channels required to process file.
+    
+    # Montage: "tuh", standard MNE name (e.g., "standard_1005"), 
+    # path to .fif file, or null for no montage.
+    montage: tuh
+    
+    # Required output channels in order (REQUIRED - no default)
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    
+    channels_to_remove: null       # Channels to drop before processing.
+    channels_rename: null          # Channel rename mapping {old: new}.
+    standardize_channel_names: true  # Apply TUH-style channel name standardization.
+    
+    # --- Quality Check Thresholds ---
+    oha_threshold: 0.00004         # 40e-6 V - Overall High Amplitude threshold.
+    thv_threshold: 0.00004         # 40e-6 V - Temporal High Variance threshold.
+    chv_threshold: 0.00008         # 80e-6 V - Channel High Variance threshold.
+    min_unique_ratio: 0.001        # Min ratio of unique samples per channel.
+    
+    # --- Quality Decision Limits ---
+    oha_limit: 0.8                 # Max fraction of high-amplitude samples.
+    thv_limit: 0.5                 # Max fraction of high-variance time points.
+    chv_limit: 0.5                 # Max fraction of high-variance channels.
+    bcr_limit: 0.8                 # Max bad channel ratio.
+    
+    drop_bad_quality: true         # Drop windows failing quality checks.
+    return_quality_metrics: false  # Collect quality metrics for export.
+    
+    # --- Interpolation Settings ---
+    # Path to target montage .fif file for spatial interpolation.
+    # If set, channels will be interpolated to this montage instead of
+    # using the standard interpolate_missing + drop_extra approach.
+    target_montage: null
+    
+    interpolation_mode: accurate   # MNE interpolation: "accurate" or "fast".
+    use_ransac: true               # Use RANSAC for bad channel detection.
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /path/to/dataset        # Directory or .txt file with paths.
+out_path: /path/to/output             # Output directory.
+log_path: /path/to/output/log.txt     # Log file path.
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false              # If false, skip already processed files.
+shuffle_files: true           # Randomly shuffle file order.
+batch_size: 10                # Files per HDF5 batch (ignored if save_as_hdf5=false).
+n_jobs: 6                     # Number of parallel workers.
+file_extension: ".edf"        # Extension(s): ".edf", ".set", or [".edf", ".set"].
+save_as_hdf5: true            # true = batch HDF5, false = individual BDF files.
+log_level: INFO               # DEBUG, INFO, WARNING, ERROR.
+sleep_after_batch: 5.0        # Seconds to sleep after each batch.
+metrics_path: null            # Directory to save quality_metrics.csv.
+
+
+# =============================================================================
+# EXAMPLE: TUH Dataset Configuration
+# =============================================================================
+# pipeline:
+#   class_path: speed.pipeline_unified.PretrainPipeline
+#   init_args:
+#     window_length: 60
+#     sfreq: 256.0
+#     hp_freq: 0.5
+#     lp_freq: 100.0
+#     line_freqs: [60.0]
+#     do_ica: true
+#     montage: tuh
+#     standardize_channel_names: true
+#     channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+# dataset_path: /data/tuh_eeg/
+# out_path: /data/tuh_preprocessed/
+# log_path: /data/tuh_preprocessed/log.txt
+# file_extension: ".edf"
+# save_as_hdf5: true
+# batch_size: 10
+
+
+# =============================================================================
+# EXAMPLE: HBN Dataset Configuration (with quality metrics)
+# =============================================================================
+# pipeline:
+#   class_path: speed.pipeline_unified.PretrainPipeline
+#   init_args:
+#     window_length: 30
+#     shift_seconds: 15
+#     sfreq: 100.0
+#     hp_freq: 0.5
+#     lp_freq: 50.0
+#     line_freqs: [60.0]
+#     do_ica: false
+#     montage: null                    # HBN uses embedded channel locations
+#     standardize_channel_names: false
+#     channels: [E2, E3, E4, E5, E6, E7, E9, E10, E11, ...]  # Full list
+#     channels_to_remove: [E48, E49, E56, ...]               # Peripheral
+#     return_quality_metrics: true
+#     drop_bad_quality: true
+# dataset_path: /data/hbn_raw/
+# out_path: /data/hbn_preprocessed/
+# log_path: /data/hbn_preprocessed/log.txt
+# metrics_path: /data/hbn_preprocessed/metrics/
+# file_extension: ".set"
+# save_as_hdf5: true
+
+
+# =============================================================================
+# EXAMPLE: Per-file BDF Output
+# =============================================================================
+# save_as_hdf5: false
+# batch_size: 1                        # Automatically set when save_as_hdf5=false
+
+
+# =============================================================================
+# EXAMPLE: Custom Montage Interpolation
+# =============================================================================
+# Use target_montage to interpolate all data to a specific electrode layout.
+# This is useful for harmonizing data from different acquisition systems.
+#
+# pipeline:
+#   class_path: speed.pipeline_unified.PretrainPipeline
+#   init_args:
+#     target_montage: /path/to/custom_montage.fif
+#     channels: [...]  # Target channels after interpolation

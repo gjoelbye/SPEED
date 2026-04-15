@@ -1,0 +1,101 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - SHU Motor Imagery
+# =============================================================================
+# 2-class motor imagery: left hand vs right hand
+# Source: Ma et al. 2022, Figshare 19228725 (CBraMod benchmark version)
+# Labels from companion *_events.tsv files (BIDS format)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/shu_mi.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['left', 'right']
+    event_tmin: 0.0
+    event_tlen: 4.0
+    label_mapping:
+      left: 0
+      right: 1
+    annotation_format: "shu_mi"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # China — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: tuh
+    # 32 EEG channels (standard 10-20, T3/T4/T5/T6 naming)
+    channels: [Fp1, Fp2, Fz, F3, F4, F7, F8, Fc1, Fc2, Fc5, Fc6, Cz, C3, C4,
+               T7, T8, A1, A2, Cp1, Cp2, Cp5, Cp6, Pz, P3, P4, T5, T6, Po3,
+               Po4, Oz, O1, O2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: true  # T3→T7, T4→T8
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/shu_mi
+out_path: /scratch/agjma/SPEED/Processed/shu_mi
+log_path: /scratch/agjma/SPEED/Processed/shu_mi/logs/shu_mi_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 25 subjects, 5 sessions each = 125 EDF files
+# - 32 EEG channels, 250 Hz native → resampled to 200 Hz
+# - ~100 trials per session (left/right hand MI, 4s each)
+# - Labels in companion *_events.tsv files (onset/duration in samples)
+# - Train: subjects 1-15 | Val: subjects 16-20 | Test: subjects 21-25
+# - Source: Figshare 19228725 (Ma et al. 2022, Scientific Data)

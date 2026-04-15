@@ -131,6 +131,8 @@ class BasePipeline(Pipeline):
         standardize_channel_names: bool = False,
         # Bipolar conversion
         bipolar_to_monopolar: bool = False,
+        # Normalization
+        normalize: Optional[str] = None,
     ):
         mne.set_log_level('ERROR')
 
@@ -186,6 +188,9 @@ class BasePipeline(Pipeline):
         if target_montage is not None:
             self.target_montage = mne.channels.read_dig_fif(str(target_montage))
         
+        # Normalization
+        self.normalize = normalize
+
         # Quality metrics buffer
         self._quality_metrics_buffer = []
     
@@ -225,8 +230,11 @@ class BasePipeline(Pipeline):
             self.oha_limit, self.thv_limit, self.chv_limit, self.bcr_limit
         )
     
-    def _interpolate_nearest(self, raw: mne.io.Raw):
-        return PreprocessMethods.interpolate_nearest(raw, self.sfreq)
+    def _resample(self, raw: mne.io.Raw):
+        return PreprocessMethods.resample(raw, self.sfreq)
+
+    def _normalize(self, raw: mne.io.Raw):
+        return PreprocessMethods.normalize(raw, self.normalize)
     
     def _drop_bad_channels(self, raw: mne.io.Raw):
         return PreprocessMethods.find_bad_channels(raw, ransac=self.use_ransac, drop=True)
@@ -413,8 +421,11 @@ class PretrainPipeline(BasePipeline):
                     times.extend(window_times)
                     indices.extend([i] * len(windows))
                 else:
-                    # Fixed windowing: slice first, process per-window
-                    windows, window_times = self._extract_windows(raw_orig)
+                    # Fixed windowing: preprocess full recording, then slice
+                    raw_processed = self._run_recording_level(raw_orig, src_path)
+                    if raw_processed is None:
+                        continue
+                    windows, window_times = self._extract_windows(raw_processed)
                     raws.extend(windows)
                     times.extend(window_times)
                     indices.extend([i] * len(windows))
@@ -428,7 +439,7 @@ class PretrainPipeline(BasePipeline):
         logging.debug(f"Total windows: {total_windows}")
 
         if not self.event_windowing:
-            # Per-window preprocessing (only for fixed windowing / pretrain mode)
+            # Per-window preprocessing (ICA, channel finalization, resampling)
             for i in range(len(raws)):
                 start_time = round(times[i][0], 1)
                 end_time = round(times[i][1], 1)
@@ -436,7 +447,10 @@ class PretrainPipeline(BasePipeline):
                 orig_info, orig_annot = original_infos[i] if self.preserve_metadata else (None, None)
 
                 try:
-                    raws[i] = self._run_single(raws[i], start_time, end_time, filename, orig_info, orig_annot)
+                    raws[i] = self._run_window_level(
+                        raws[i], start_time, end_time, filename,
+                        orig_info, orig_annot
+                    )
                 except Exception as e:
                     logging.error(
                         f"File: {filename}. Time: {(start_time, end_time)}. "
@@ -765,6 +779,134 @@ class PretrainPipeline(BasePipeline):
 
         return self._split_raw(raw)
     
+    def _run_recording_level(
+        self,
+        raw: mne.io.Raw,
+        filename: Union[str, Path],
+        skip_quality_check: bool = False
+    ) -> Optional[mne.io.Raw]:
+        """
+        Recording-level preprocessing (should run on full recording before windowing).
+
+        Includes quality check, line noise removal, bad channel detection,
+        bandpass filtering, and average re-referencing.
+
+        Parameters
+        ----------
+        raw : mne.io.Raw
+            Raw EEG data (full recording).
+        filename : str or Path
+            Source filename for logging.
+        skip_quality_check : bool
+            If True, skip quality check.
+
+        Returns
+        -------
+        mne.io.Raw or None
+            Preprocessed raw object, or None if quality check failed.
+        """
+        info_str = f"File: {filename}."
+
+        # Quality check
+        if not skip_quality_check:
+            passed, metrics = self._run_quality_check(raw, info_str)
+
+            if self.return_quality_metrics:
+                self._add_quality_metric(filename, 0.0, raw.times[-1], metrics)
+
+            if not passed:
+                return None
+
+        # Line noise removal
+        self._remove_line_noise(raw)
+
+        # Find and drop bad channels
+        bad_chs = self._drop_bad_channels(raw)
+        logging.info(f"{info_str} Found {len(bad_chs)} bad channels: {bad_chs}.")
+
+        # Bandpass filter
+        self._filter(raw)
+
+        # Average reference
+        self._average_reference(raw)
+
+        return raw
+
+    def _run_window_level(
+        self,
+        raw: mne.io.Raw,
+        start_time: float,
+        end_time: float,
+        filename: Union[str, Path],
+        original_info: Optional[mne.Info] = None,
+        original_annotations: Optional[mne.Annotations] = None,
+    ) -> Optional[mne.io.Raw]:
+        """
+        Window-level preprocessing (runs per-window after windowing).
+
+        Includes ICA artifact rejection, channel finalization,
+        resampling, and metadata restoration.
+
+        Parameters
+        ----------
+        raw : mne.io.Raw
+            Raw EEG data window.
+        start_time : float
+            Window start time in seconds.
+        end_time : float
+            Window end time in seconds.
+        filename : str or Path
+            Source filename for logging.
+        original_info : mne.Info, optional
+            Original info to restore (if preserve_metadata=True).
+        original_annotations : mne.Annotations, optional
+            Original annotations to restore.
+
+        Returns
+        -------
+        mne.io.Raw or None
+            Preprocessed raw object.
+        """
+        info_str = f"File: {filename}. Time: ({start_time}, {end_time})."
+
+        # ICA artifact rejection
+        if self.do_ica:
+            excluded, labels, proba = self._ica_clean(raw)
+            logging.info(f"{info_str} Excluding {len(excluded)} ICA components.")
+            logging.info(f"{info_str} Labels: {labels}.")
+            logging.info(f"{info_str} Probabilities: {[round(p, 2) for p in proba]}.")
+
+            bad_chs = self._drop_bad_channels(raw)
+            logging.info(f"{info_str} Found {len(bad_chs)} bad channels after ICA.")
+
+        # Channel finalization
+        if self.target_montage is not None:
+            logging.info(f"{info_str} Interpolating to target montage.")
+            raw = self._interpolate_to_target_montage(raw)
+        else:
+            missing = self._interpolate_missing(raw)
+            if missing:
+                logging.info(f"{info_str} Interpolated {len(missing)} missing channels.")
+
+            extra = self._drop_extra_channels(raw)
+            if extra:
+                logging.info(f"{info_str} Removed {len(extra)} extra channels.")
+
+            self._reorder_channels(raw)
+
+        # Resample to target frequency
+        self._resample(raw)
+
+        # Normalize
+        if self.normalize is not None:
+            self._normalize(raw)
+
+        # Restore metadata if requested
+        if self.preserve_metadata and original_info is not None:
+            self._restore_metadata(raw, original_info, original_annotations)
+
+        return raw
+
     def _run_single(
         self,
         raw: mne.io.Raw,
@@ -776,8 +918,12 @@ class PretrainPipeline(BasePipeline):
         skip_quality_check: bool = False
     ) -> Optional[mne.io.Raw]:
         """
-        Process a single window/file.
-        
+        Process a single window/file (full pipeline).
+
+        Composes recording-level and window-level preprocessing.
+        Used by process_single() and the event-windowing path where the
+        full recording is processed as one unit.
+
         Parameters
         ----------
         raw : mne.io.Raw
@@ -794,70 +940,20 @@ class PretrainPipeline(BasePipeline):
             Original annotations to restore.
         skip_quality_check : bool
             If True, skip quality check (used when already done by caller).
-        
+
         Returns
         -------
         mne.io.Raw or None
             Preprocessed raw object, or None if dropped.
         """
-        info_str = f"File: {filename}. Time: ({start_time}, {end_time})."
-        
-        # Quality check (skip if already done by caller, e.g., process_single)
-        if not skip_quality_check:
-            passed, metrics = self._run_quality_check(raw, info_str)
-            
-            if self.return_quality_metrics:
-                self._add_quality_metric(filename, start_time, end_time, metrics)
-            
-            if not passed:
-                return None
-        
-        # Line noise removal
-        self._remove_line_noise(raw)
-        
-        # Find and drop bad channels
-        bad_chs = self._drop_bad_channels(raw)
-        logging.info(f"{info_str} Found {len(bad_chs)} bad channels: {bad_chs}.")
-        
-        # Bandpass filter
-        self._filter(raw)
-        
-        # Average reference
-        self._average_reference(raw)
-        
-        # ICA artifact rejection
-        if self.do_ica:
-            excluded, labels, proba = self._ica_clean(raw)
-            logging.info(f"{info_str} Excluding {len(excluded)} ICA components.")
-            logging.info(f"{info_str} Labels: {labels}.")
-            logging.info(f"{info_str} Probabilities: {[round(p, 2) for p in proba]}.")
-            
-            bad_chs = self._drop_bad_channels(raw)
-            logging.info(f"{info_str} Found {len(bad_chs)} bad channels after ICA.")
-        
-        # Channel finalization
-        if self.target_montage is not None:
-            logging.info(f"{info_str} Interpolating to target montage.")
-            raw = self._interpolate_to_target_montage(raw)
-        else:
-            missing = self._interpolate_missing(raw)
-            if missing:
-                logging.info(f"{info_str} Interpolated {len(missing)} missing channels.")
-            
-            extra = self._drop_extra_channels(raw)
-            if extra:
-                logging.info(f"{info_str} Removed {len(extra)} extra channels.")
-            
-            self._reorder_channels(raw)
-        
-        # Resample to target frequency
-        self._interpolate_nearest(raw)
-        
-        # Restore metadata if requested
-        if self.preserve_metadata and original_info is not None:
-            self._restore_metadata(raw, original_info, original_annotations)
-        
-        return raw
+        raw = self._run_recording_level(raw, filename, skip_quality_check)
+        if raw is None:
+            return None
+
+        return self._run_window_level(
+            raw, start_time, end_time, filename,
+            original_info, original_annotations
+        )
     
     def _run_quality_check(
         self,

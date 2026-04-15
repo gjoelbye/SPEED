@@ -1,0 +1,99 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - Mental Arithmetic (EEGMAT)
+# =============================================================================
+# Binary classification: baseline (resting) vs mental arithmetic task
+# Labels derived from filename: Subject##_1.edf = baseline, Subject##_2.edf = arithmetic
+# Source: PhysioNet (eeg-during-mental-arithmetic-tasks)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/eegmat.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['baseline', 'arithmetic']
+    event_tmin: 0.0
+    event_tlen: 5.0
+    label_mapping:
+      baseline: 0
+      arithmetic: 1
+    annotation_format: "eegmat"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # Ukraine dataset — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: tuh
+    # 19 EEG channels (drop A2-A1 reference and ECG)
+    # Raw names: EEG Fp1, EEG T3, etc. — standardize_channel_names strips prefix
+    channels: [Fp1, Fp2, F3, F4, F7, F8, T7, T8, C3, C4, T5, T6, P3, P4, O1, O2, Fz, Cz, Pz]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: true  # Strips EEG prefix, renames T3→T7, T4→T8
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/eegmat
+out_path: /scratch/agjma/SPEED/Processed/eegmat
+log_path: /scratch/agjma/SPEED/Processed/eegmat/logs/eegmat_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 36 subjects, each with 2 recordings (baseline + arithmetic)
+# - ~182 seconds per recording → ~36 windows of 5s per file
+# - Original sfreq: 500 Hz → resampled to 200 Hz
+# - 19 EEG channels + A2-A1 reference + ECG (dropped by montage)
+# - Train: subjects 1-28 | Val: subjects 29-32 | Test: subjects 33-36

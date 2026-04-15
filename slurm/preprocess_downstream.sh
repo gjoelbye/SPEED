@@ -12,16 +12,16 @@
 #SBATCH --time=48:00:00
 
 CONFIGS=(
-    configs/downstream_eegmat.yaml
-    configs/downstream_mumtaz2016.yaml
-    configs/downstream_bcic_iv_2a.yaml
-    configs/downstream_isruc.yaml
-    configs/downstream_hmc.yaml
-    configs/downstream_eegmmidb.yaml
-    configs/downstream_chbmit.yaml
-    configs/downstream_shu_mi.yaml
-    configs/downstream_mobi.yaml
-    configs/downstream_siena.yaml
+    configs/downstream/eegmat.yaml
+    configs/downstream/mumtaz2016.yaml
+    configs/downstream/bcic_iv_2a.yaml
+    configs/downstream/isruc.yaml
+    configs/downstream/hmc.yaml
+    configs/downstream/eegmmidb.yaml
+    configs/downstream/chbmit.yaml
+    configs/downstream/shu_mi.yaml
+    configs/downstream/mobi.yaml
+    configs/downstream/siena.yaml
 )
 
 CONFIG=${CONFIGS[$SLURM_ARRAY_TASK_ID]}

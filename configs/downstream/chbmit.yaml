@@ -1,0 +1,129 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - CHBMIT Seizure Detection
+# =============================================================================
+# This configuration preprocesses CHBMIT EEG files for seizure detection with:
+# - Event-based windowing: 60-second windows around seizures and non-seizures
+# - 2-class classification: seizure vs non-seizure
+# - Conversion from bipolar montage to standard 19 channels
+# - Sliding window non-seizure generation from inter-ictal periods
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/chbmit.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    # --- Metadata Preservation ---
+    preserve_metadata: true
+
+    # --- Event-Based Windowing (NEW for downstream tasks) ---
+    event_windowing: true
+    event_labels: ['seizure', 'non-seizure']
+    event_tmin: 0.0                          # Start at event onset
+    event_tlen: 10.0                         # 10-second windows
+    label_mapping:
+      non-seizure: 0
+      seizure: 1
+    annotation_format: "chbmit"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+
+    # Target sampling frequency (Hz) - CHBMIT native 256 Hz, resample to 200 Hz
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5                   # High-pass filter cutoff (Hz)
+    lp_freq: 100.0                 # Low-pass filter cutoff (Hz)
+    line_freqs: [60.0]             # Power line frequencies to notch filter
+
+    # --- ICA Settings ---
+    do_ica: false                   # Skip ICA for seizure detection (preserve seizure activity)
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+
+    # Bipolar-to-monopolar conversion
+    # CHBMIT uses bipolar montage (e.g., FP1-F7, F7-T7, etc.)
+    # This converts to standard monopolar electrode positions
+    bipolar_to_monopolar: true
+    montage: tuh
+
+    # Required output channels (standard 19 channels)
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: true
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004         # 40e-6 V - Overall High Amplitude threshold
+    thv_threshold: 0.00004         # 40e-6 V - Temporal High Variance threshold
+    chv_threshold: 0.00008         # 80e-6 V - Channel High Variance threshold
+    min_unique_ratio: 0.001        # Min ratio of unique samples per channel
+
+    # Decision limits
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+
+    # Don't drop bad quality windows (important for seizure detection)
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/chbmit
+out_path: /scratch/agjma/SPEED/Processed/chbmit
+log_path: /scratch/agjma/SPEED/Processed/chbmit/logs/chbmit_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false              # If false, skip already processed batches
+shuffle_files: false          # Randomly shuffle file order
+n_jobs: 8                     # Number of parallel workers (currently sequential)
+file_extension: ".edf"        # Extension(s): ".edf", ".bdf", ".set", or list
+log_level: INFO               # DEBUG, INFO, WARNING, ERROR
+
+# Processing batch size
+batch_size: 100  # Windows per HDF5 file (10s windows)
+
+
+# =============================================================================
+# Notes on CHBMIT Dataset
+# =============================================================================
+# - 24 subjects (chb01-chb24)
+# - 676 total recordings (1 hour each)
+# - 141 files contain seizures (112 total seizure events)
+# - 23 bipolar channels at 256 Hz
+# - Summary files: chb##-summary.txt contain seizure annotations
+#
+# Non-seizure window generation:
+# - Sliding window (60s, non-overlapping) over inter-ictal periods
+# - Excludes seizure times ± 60s margin
+# - Expect high class imbalance (~1:287 seizure:non-seizure ratio)
+# - Use weighted sampling or class weights during training
+#
+# Channel conversion:
+# - CHBMIT uses bipolar derivations (FP1-F7, F7-T7, etc.)
+# - Config converts to standard 19-channel montage for compatibility
+# - Alternative: Keep bipolar montage by setting montage: null and
+#   channels: [FP1-F7, F7-T7, ...] (all 23 bipolar channels)
+# =============================================================================

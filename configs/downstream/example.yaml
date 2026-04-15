@@ -1,0 +1,172 @@
+# =============================================================================
+# Downstream Preprocessing Configuration
+# =============================================================================
+# This configuration preprocesses EEG files while preserving:
+# - Original folder structure
+# - Original file naming
+# - Original file format (EDF, BDF, SET when possible)
+# - Metadata (subject info, recording date, annotations)
+#
+# Usage:
+#   python scripts/preprocess.py --config configs/downstream/example.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    # --- Metadata Preservation (key for downstream use) ---
+    preserve_metadata: true
+    
+    # --- Processing Settings ---
+    # For downstream: use null to process full files (no windowing)
+    window_length: null
+    shift_seconds: null
+    
+    # Target sampling frequency (Hz) after resampling
+    sfreq: 256.0
+    
+    # --- Filter Settings ---
+    hp_freq: 0.5                   # High-pass filter cutoff (Hz). null = skip.
+    lp_freq: 100.0                 # Low-pass filter cutoff (Hz). null = skip.
+    line_freqs: [60.0]             # Power line frequencies to notch filter.
+    
+    # --- ICA Settings ---
+    do_ica: true                   # Whether to run ICA artifact rejection.
+    iclabel_threshold: 0.7         # Probability threshold for component rejection.
+    included_components:           # Component types to keep.
+      - brain
+      - other
+    
+    # --- Channel Configuration ---
+    min_nchans: 10                 # Minimum channels required to process file.
+    
+    # Montage: "tuh", standard MNE name (e.g., "standard_1005"), 
+    # path to .fif file, or null for no montage.
+    montage: tuh
+    
+    # Required output channels in order (REQUIRED - no default)
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    
+    channels_to_remove: null       # Channels to drop before processing.
+    channels_rename: null          # Channel rename mapping {old: new}.
+    standardize_channel_names: true  # Apply TUH-style channel name standardization.
+    
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004         # 40e-6 V - Overall High Amplitude threshold.
+    thv_threshold: 0.00004         # 40e-6 V - Temporal High Variance threshold.
+    chv_threshold: 0.00008         # 80e-6 V - Channel High Variance threshold.
+    min_unique_ratio: 0.001        # Min ratio of unique samples per channel.
+    
+    # Decision limits
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    
+    # Note: drop_bad_quality is for batch mode windowing
+    # For downstream, use skip_on_quality_fail instead (see below)
+    drop_bad_quality: false
+    return_quality_metrics: true
+    
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /path/to/input/dataset    # Directory or .txt file with paths.
+out_path: /path/to/output               # Output directory (structure preserved).
+log_path: /path/to/output/log.txt       # Log file path.
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false              # If false, skip already processed files.
+shuffle_files: false          # Randomly shuffle file order.
+n_jobs: 4                     # Number of parallel workers.
+file_extension: ".edf"        # Extension(s): ".edf", ".bdf", ".set", or list.
+log_level: INFO               # DEBUG, INFO, WARNING, ERROR.
+metrics_path: /path/to/output/  # Directory to save quality_metrics.csv.
+
+
+# =============================================================================
+# DOWNSTREAM MODE OPTIONS (set preserve_structure: true)
+# =============================================================================
+preserve_structure: true      # KEY: Enable downstream mode
+
+# Output format: "auto" (preserve original), "edf", "bdf", or "set"
+output_format: auto
+fallback_format: edf          # Fallback if requested format unavailable
+
+# Quality check behavior for downstream mode
+skip_on_quality_fail: false   # If true, skip files that fail quality checks.
+                              # If false, process and save them anyway.
+
+# Copy non-EEG files to preserve complete folder structure
+copy_other_files: true
+
+# Patterns to exclude when copying (uses sensible defaults if null)
+exclude_patterns: null
+
+
+# =============================================================================
+# EXAMPLE CONFIGURATIONS
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Example 1: TUH Dataset - Process all files, preserve structure
+# -----------------------------------------------------------------------------
+# pipeline:
+#   class_path: speed.pipeline.PretrainPipeline
+#   init_args:
+#     preserve_metadata: true
+#     window_length: null
+#     sfreq: 256.0
+#     hp_freq: 0.5
+#     lp_freq: 100.0
+#     line_freqs: [60.0]
+#     do_ica: true
+#     montage: tuh
+#     channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+#     return_quality_metrics: true
+# 
+# dataset_path: /data/tuh_raw/
+# out_path: /data/tuh_processed/
+# log_path: /data/tuh_processed/log.txt
+# metrics_path: /data/tuh_processed/
+# preserve_structure: true
+# output_format: auto
+# copy_other_files: true
+# n_jobs: 8
+
+
+# -----------------------------------------------------------------------------
+# Example 2: Skip bad quality files
+# -----------------------------------------------------------------------------
+# skip_on_quality_fail: true
+# return_quality_metrics: true
+
+
+# -----------------------------------------------------------------------------
+# Example 3: Convert all to EDF format
+# -----------------------------------------------------------------------------
+# file_extension: [".edf", ".bdf", ".set"]
+# output_format: edf
+
+
+# -----------------------------------------------------------------------------
+# Example 4: Fast processing without ICA
+# -----------------------------------------------------------------------------
+# pipeline:
+#   class_path: speed.pipeline.PretrainPipeline
+#   init_args:
+#     preserve_metadata: true
+#     window_length: null
+#     do_ica: false
+#     use_ransac: false
+#     interpolation_mode: fast

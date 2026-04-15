@@ -22,6 +22,7 @@ pyedflib >= 0.1.30
 tqdm >= 4.66
 joblib >= 1.3
 jsonargparse >= 4.24.0
+scikit-learn >= 1.3
 
 # training / logging
 pytorch-lightning >= 2.1.0

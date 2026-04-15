@@ -121,8 +121,9 @@ cython_debug/
 .idea/
 
 
-pyproject.toml
 chb01/
-.DS_store
-docs/
+.DS_Store
 logs/
+checkpoints/
+*.ckpt
+CLAUDE.md

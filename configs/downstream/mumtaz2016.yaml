@@ -1,0 +1,100 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - Mumtaz2016 Depression Detection
+# =============================================================================
+# Binary classification: MDD (major depressive disorder) vs healthy control
+# Labels from directory structure (MDD/ vs HC/ subdirectories)
+# Only eyes-open and eyes-closed sessions (task session excluded)
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/mumtaz2016.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['depressed', 'healthy']
+    event_tmin: 0.0
+    event_tlen: 5.0
+    label_mapping:
+      healthy: 0
+      depressed: 1
+    annotation_format: "mumtaz2016"
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.3                    # Original study: 0.3 Hz high-pass
+    lp_freq: 75.0                   # Original study: 75 Hz low-pass
+    line_freqs: [50.0]              # Malaysia — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: tuh
+    # 19 standard 10-20 channels
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: true
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/mumtaz2016
+out_path: /scratch/agjma/SPEED/Processed/mumtaz2016
+log_path: /scratch/agjma/SPEED/Processed/mumtaz2016/logs/mumtaz2016_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 64 subjects: 34 MDD + 30 healthy controls
+# - Eyes-open and eyes-closed recordings only (task session excluded per CBraMod)
+# - Original sfreq: 256 Hz → resampled to 200 Hz
+# - Original filtering: 0.3-75 Hz bandpass, 50 Hz notch
+# - 19 standard 10-20 EEG channels
+# - Train: 24 MDD + 19 HC | Val: 5 MDD + 4 HC | Test: 5 MDD + 5 HC (subject-wise)
+# - Needs download

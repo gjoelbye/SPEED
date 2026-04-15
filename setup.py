@@ -22,8 +22,8 @@ def read_requirements():
         return requirements
 
 setup(
-    name="speed",
-    version="0.1.0",
+    name="speed-eeg",
+    version="2.0.0",
     author="Anders Gjølbye, Lina Skerath, William Lehn-Schiøler, Nicolas Langer, Lars Kai Hansen",
     author_email="",  # Add email if available
     description="Scalable Preprocessing of EEG Data For Self-Supervised Learning",
@@ -61,7 +61,7 @@ setup(
     },
     include_package_data=True,
     package_data={
-        "speed": ["configs/*.yaml"],
+        "speed": ["configs/**/*.yaml"],
     },
     keywords="eeg, preprocessing, machine learning, self-supervised learning, neuroscience",
     project_urls={

@@ -15,8 +15,6 @@ from mne.preprocessing import ICA
 from mne_icalabel import label_components
 from meegkit.detrend import detrend
 from meegkit.dss import dss_line_iter
-from torch.nn.functional import interpolate
-from torch import tensor
 
 from speed.utils import create_channel_type_dict, heuristic_resolution
 
@@ -155,10 +153,13 @@ class PreprocessMethods:
     # =========================================================================
     
     @staticmethod
-    def interpolate_nearest(raw: mne.io.Raw, sfreq: float = 256.0) -> None:
+    def resample(raw: mne.io.Raw, sfreq: float = 256.0) -> None:
         """
-        Resample data using nearest-neighbor interpolation.
-        
+        Resample data using MNE's anti-aliased resampling.
+
+        Uses a FIR anti-aliasing filter before decimation to prevent
+        frequency aliasing artifacts.
+
         Parameters
         ----------
         raw : mne.io.Raw
@@ -166,23 +167,46 @@ class PreprocessMethods:
         sfreq : float
             Target sampling frequency.
         """
-        x = raw._data
-        old_sfreq = raw.info['sfreq']
-        
-        resampled_data = interpolate(
-            tensor(x).unsqueeze(0),
-            scale_factor=sfreq / old_sfreq,
-            mode="nearest"
-        ).squeeze(0).numpy()
-        
-        lowpass = raw.info.get("lowpass")
-        with raw.info._unlock():
-            raw.info["sfreq"] = sfreq
-            raw.info["lowpass"] = min(lowpass, sfreq / 2.0) if lowpass else sfreq / 2.0
-        
-        raw._data = resampled_data
-        raw._last_samps = np.array([resampled_data.shape[1] - 1])
+        if raw.info['sfreq'] != sfreq:
+            raw.resample(sfreq, verbose=False)
     
+    # =========================================================================
+    # Normalization
+    # =========================================================================
+
+    @staticmethod
+    def normalize(raw: mne.io.Raw, method: str = "zscore") -> None:
+        """
+        Normalize EEG data in-place.
+
+        Parameters
+        ----------
+        raw : mne.io.Raw
+            The raw data to normalize (modified in-place).
+        method : str
+            Normalization method: "zscore", "minmax", or "robust".
+        """
+        data = raw._data
+        eps = 1e-8
+
+        if method == "zscore":
+            mean = data.mean(axis=-1, keepdims=True)
+            std = data.std(axis=-1, keepdims=True)
+            raw._data = (data - mean) / (std + eps)
+        elif method == "minmax":
+            dmin = data.min(axis=-1, keepdims=True)
+            dmax = data.max(axis=-1, keepdims=True)
+            raw._data = (data - dmin) / (dmax - dmin + eps)
+        elif method == "robust":
+            median = np.median(data, axis=-1, keepdims=True)
+            q75 = np.percentile(data, 75, axis=-1, keepdims=True)
+            q25 = np.percentile(data, 25, axis=-1, keepdims=True)
+            iqr = q75 - q25
+            raw._data = (data - median) / (iqr + eps)
+        else:
+            raise ValueError(f"Unknown normalization method: {method!r}. "
+                             f"Choose from 'zscore', 'minmax', 'robust'.")
+
     # =========================================================================
     # Montage and Channel Management
     # =========================================================================
@@ -482,3 +506,4 @@ class PreprocessMethods:
 # Backward compatibility aliases
 PreprocessMethods.reorder_chans = PreprocessMethods.reorder_channels
 PreprocessMethods.interpolate_to_hbn = PreprocessMethods.interpolate_to_target_montage
+PreprocessMethods.interpolate_nearest = PreprocessMethods.resample

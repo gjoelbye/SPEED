@@ -5,8 +5,8 @@ This script processes EEG datasets for downstream tasks (e.g., motor imagery,
 seizure detection) by extracting event-locked windows with labels.
 
 Usage:
-    python scripts/preprocess_downstream.py --config configs/downstream_eegmmidb.yaml
-    python scripts/preprocess_downstream.py --config configs/downstream_chbmit.yaml
+    python scripts/preprocess_downstream.py --config configs/downstream/eegmmidb.yaml
+    python scripts/preprocess_downstream.py --config configs/downstream/chbmit.yaml
 """
 
 import os

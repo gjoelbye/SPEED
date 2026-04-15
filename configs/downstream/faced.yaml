@@ -1,0 +1,108 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - FACED Emotion Recognition
+# =============================================================================
+# 9-class emotion recognition from EEG
+# Requires conversion from .mat to EDF first: python scripts/converters/convert_faced.py
+# Source: OpenNeuro / author request
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/faced.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['amusement', 'inspiration', 'joy', 'tenderness',
+                   'anger', 'disgust', 'fear', 'sadness', 'neutral']
+    event_tmin: 0.0
+    event_tlen: 10.0
+    label_mapping:
+      amusement: 0
+      inspiration: 1
+      joy: 2
+      tenderness: 3
+      anger: 4
+      disgust: 5
+      fear: 6
+      sadness: 7
+      neutral: 8
+    annotation_format: "eegmmidb"    # Annotations embedded in EDF by conversion script
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # China — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: standard_1005
+    # 32 channels (10-20 extended)
+    channels: [Fp1, Fp2, AF3, AF4, F7, F3, Fz, F4, F8, FC5, FC1, FC2, FC6,
+               T7, C3, Cz, C4, T8, CP5, CP1, CP2, CP6, P7, P3, Pz, P4, P8,
+               PO3, PO4, O1, Oz, O2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: false
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/faced/edf
+out_path: /scratch/agjma/SPEED/Processed/faced
+log_path: /scratch/agjma/SPEED/Processed/faced/logs/faced_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 123 subjects, 10,332 total 10-second samples
+# - Original: .mat at 250 Hz → converted to EDF → resampled to 200 Hz
+# - 32 EEG channels (standard 10-20 extended)
+# - Train: subjects 1-80 | Val: subjects 81-100 | Test: subjects 101-123
+# - Requires .mat → EDF conversion before processing

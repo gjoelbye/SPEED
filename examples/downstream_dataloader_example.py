@@ -271,6 +271,40 @@ def example_training_loop():
 
 
 # =============================================================================
+# Example 7: Subject-Wise Splitting (Preventing Data Leakage)
+# =============================================================================
+
+def example_subject_wise_split():
+    """Split dataset by subject so no subject appears in multiple splits."""
+    from speed import DownstreamDataset, subject_wise_split, SUBJECT_EXTRACTORS
+
+    data_path = "/scratch/agjma/SPEED/Processed/eegmmidb"
+
+    dataset = DownstreamDataset(data_path)
+    print(f"Total samples: {len(dataset)}")
+
+    # Split by subject (70% train, 15% val, 15% test)
+    train, val, test = subject_wise_split(
+        dataset,
+        train_ratio=0.7,
+        val_ratio=0.15,
+        test_ratio=0.15,
+        subject_extractor=SUBJECT_EXTRACTORS['eegmmidb'],
+        seed=42
+    )
+
+    print(f"Train: {len(train)} samples")
+    print(f"Val:   {len(val)} samples")
+    print(f"Test:  {len(test)} samples")
+
+    # Verify no subject leakage
+    from torch.utils.data import DataLoader
+    train_loader = DataLoader(train, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val, batch_size=64)
+    test_loader = DataLoader(test, batch_size=64)
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -286,14 +320,17 @@ def main():
     # Dataset-specific examples
     # example_chbmit_imbalanced()  # Requires CHBMIT processed data
 
+    # Subject-wise splitting
+    # example_subject_wise_split()  # Requires EEGMMIDB processed data
+
     # Training example
     # example_training_loop()  # Requires EEGMMIDB processed data and PyTorch
 
     print("\n=== Examples Complete ===")
     print("\nUncomment the examples you want to run in the main() function.")
     print("Make sure you've preprocessed the data first using:")
-    print("  python scripts/preprocess_downstream.py --config configs/downstream_eegmmidb.yaml")
-    print("  python scripts/preprocess_downstream.py --config configs/downstream_chbmit.yaml")
+    print("  python scripts/preprocess_downstream.py --config configs/downstream/eegmmidb.yaml")
+    print("  python scripts/preprocess_downstream.py --config configs/downstream/chbmit.yaml")
 
 
 if __name__ == "__main__":

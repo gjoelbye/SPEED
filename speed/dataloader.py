@@ -6,13 +6,15 @@ from HDF5 files created by the downstream preprocessing pipeline.
 """
 
 import os
+import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple, Dict, Any, Union
 
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 
 
 class DownstreamDataset(Dataset):
@@ -225,6 +227,153 @@ class DownstreamDataset(Dataset):
         if 0 <= label < len(self.label_descriptions):
             return self.label_descriptions[label]
         return str(label)
+
+    def get_subject_groups(
+        self,
+        subject_extractor: Optional[Callable[[str], str]] = None
+    ) -> Dict[str, List[int]]:
+        """
+        Group sample indices by subject ID.
+
+        Parameters
+        ----------
+        subject_extractor : callable, optional
+            Function mapping a source filename (str) to a subject ID (str).
+            If None, uses a default heuristic: first token before '_' or '-'.
+
+        Returns
+        -------
+        groups : dict
+            Mapping from subject ID to list of global sample indices.
+        """
+        if subject_extractor is None:
+            subject_extractor = _default_subject_extractor
+
+        # Build mapping: for each HDF5 file, read 'files' and 'file_idxs'
+        groups = defaultdict(list)
+
+        # Track cumulative offset for global indices
+        global_offset = 0
+        for file_idx, hdf5_path in enumerate(self.paths):
+            with h5py.File(hdf5_path, 'r') as f:
+                # Get source filenames
+                if 'files' not in f:
+                    # No source file metadata, treat entire HDF5 as one subject
+                    n_local = sum(1 for fi, _ in self.index if fi == file_idx)
+                    subject_id = hdf5_path.stem
+                    for gi, (fi, _) in enumerate(self.index):
+                        if fi == file_idx:
+                            groups[subject_id].append(gi)
+                    continue
+
+                source_files = [
+                    s.decode('utf-8') if isinstance(s, bytes) else s
+                    for s in f['files'][:]
+                ]
+
+                # Get per-sample file_idxs
+                file_idxs = f['file_idxs'][:] if 'file_idxs' in f else None
+
+            # Map global indices to subjects
+            for gi, (fi, local_idx) in enumerate(self.index):
+                if fi != file_idx:
+                    continue
+                if file_idxs is not None:
+                    src_name = source_files[file_idxs[local_idx]]
+                else:
+                    src_name = hdf5_path.stem
+                subject_id = subject_extractor(src_name)
+                groups[subject_id].append(gi)
+
+        return dict(groups)
+
+
+def _default_subject_extractor(filename: str) -> str:
+    """Extract subject ID from filename using first token before '_' or '-'."""
+    # Try common patterns: S001R03 -> S001, chb01_03 -> chb01, sub-001_task -> sub-001
+    match = re.match(r'^((?:sub-)?[A-Za-z]*\d+)', filename)
+    if match:
+        return match.group(1)
+    # Fallback: first token split by '_'
+    return filename.split('_')[0]
+
+
+# Per-dataset subject extractors
+SUBJECT_EXTRACTORS = {
+    'eegmmidb': lambda f: re.match(r'^(S\d+)', f).group(1) if re.match(r'^(S\d+)', f) else f.split('R')[0],
+    'chbmit': lambda f: f.split('_')[0],
+    'tuab': lambda f: '_'.join(f.split('_')[:3]),
+    'tuev': lambda f: '_'.join(f.split('_')[:3]),
+    'isruc': lambda f: f.split('_')[0],
+    'hmc': lambda f: f.split('_')[0],
+    'siena': lambda f: f.split('_')[0],
+    'eegmat': lambda f: f.split('_')[0],
+    'seedv': lambda f: f.split('_')[0],
+    'seed_vig': lambda f: f.split('_')[0],
+    'faced': lambda f: f.split('_')[0],
+    'mumtaz2016': lambda f: f.split('_')[0],
+    'shu_mi': lambda f: f.split('_')[0],
+    'mobi': lambda f: f.split('_')[0],
+    'bcic_iv_2a': lambda f: f.split('_')[0],
+    'bcic2020_iv_3': lambda f: f.split('_')[0],
+}
+
+
+def subject_wise_split(
+    dataset: 'DownstreamDataset',
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    subject_extractor: Optional[Callable[[str], str]] = None,
+    seed: int = 42
+) -> Tuple[Subset, Subset, Subset]:
+    """
+    Split dataset ensuring no subject appears in multiple splits.
+
+    Parameters
+    ----------
+    dataset : DownstreamDataset
+        Dataset to split.
+    train_ratio : float
+        Fraction of subjects for training.
+    val_ratio : float
+        Fraction of subjects for validation.
+    test_ratio : float
+        Fraction of subjects for testing.
+    subject_extractor : callable, optional
+        Function mapping filename to subject ID. If None, uses default heuristic.
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    train_subset, val_subset, test_subset : Subset
+        Non-overlapping subsets with subject-level isolation.
+    """
+    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 1e-6:
+        raise ValueError(
+            f"Ratios must sum to 1.0, got {train_ratio + val_ratio + test_ratio}"
+        )
+
+    groups = dataset.get_subject_groups(subject_extractor)
+    subjects = sorted(groups.keys())
+
+    rng = np.random.RandomState(seed)
+    rng.shuffle(subjects)
+
+    n = len(subjects)
+    n_train = max(1, round(n * train_ratio))
+    n_val = max(1, round(n * val_ratio)) if val_ratio > 0 else 0
+    # test gets the remainder
+    train_subjects = subjects[:n_train]
+    val_subjects = subjects[n_train:n_train + n_val]
+    test_subjects = subjects[n_train + n_val:]
+
+    train_indices = [idx for s in train_subjects for idx in groups[s]]
+    val_indices = [idx for s in val_subjects for idx in groups[s]]
+    test_indices = [idx for s in test_subjects for idx in groups[s]]
+
+    return Subset(dataset, train_indices), Subset(dataset, val_indices), Subset(dataset, test_indices)
 
 
 def get_dataloader(

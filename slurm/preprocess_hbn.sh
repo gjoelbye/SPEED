@@ -18,6 +18,6 @@ echo "Start: $(date +%F-%R:%S)"
 echo -e "Working dir: $(pwd)\n"
 
 source ~/.bashrc
-python scripts/preprocess.py --config configs/hbn.yaml
+python scripts/preprocess.py --config configs/pretrain/hbn.yaml
 
 echo "Done: $(date +%F-%R:%S)"

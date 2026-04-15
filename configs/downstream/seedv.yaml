@@ -1,0 +1,105 @@
+# =============================================================================
+# Downstream Preprocessing Configuration - SEED-V Emotion Recognition
+# =============================================================================
+# 5-class emotion recognition: happy, sad, disgust, neutral, fear
+# Requires conversion from .mat to EDF first: python scripts/converters/convert_seedv.py
+# Source: BCMI lab, Shanghai Jiao Tong University
+#
+# Usage:
+#   python scripts/preprocess_downstream.py --config configs/downstream/seedv.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    # --- Event-Based Windowing ---
+    event_windowing: true
+    event_labels: ['happy', 'sad', 'disgust', 'neutral', 'fear']
+    event_tmin: 0.0
+    event_tlen: 1.0                          # 1-second windows
+    label_mapping:
+      happy: 0
+      sad: 1
+      disgust: 2
+      neutral: 3
+      fear: 4
+    annotation_format: "eegmmidb"    # Annotations embedded in EDF by conversion script
+
+    # --- Processing Settings ---
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    # --- Filter Settings ---
+    hp_freq: 0.5
+    lp_freq: 100.0
+    line_freqs: [50.0]              # China — 50 Hz power line
+
+    # --- ICA Settings ---
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    # --- Channel Configuration ---
+    min_nchans: 10
+    montage: standard_1005
+    # 62 channels (BCMI NeuroScan ESI system)
+    channels: [Fp1, Fpz, Fp2, AF3, AF4, F7, F5, F3, F1, Fz, F2, F4, F6, F8,
+               FT7, FC5, FC3, FC1, FCz, FC2, FC4, FC6, FT8, T7, C5, C3, C1,
+               Cz, C2, C4, C6, T8, TP7, CP5, CP3, CP1, CPz, CP2, CP4, CP6,
+               TP8, P7, P5, P3, P1, Pz, P2, P4, P6, P8, PO7, PO5, PO3, POz,
+               PO4, PO6, PO8, CB1, O1, Oz, O2, CB2]
+    channels_to_remove: null
+    channels_rename: null
+    standardize_channel_names: false
+
+    # --- Quality Check Settings ---
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: false
+    return_quality_metrics: true
+
+    # --- Interpolation Settings ---
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+# =============================================================================
+# Dataset Configuration
+# =============================================================================
+dataset_path: /scratch/agjma/SPEED/Original/seedv/edf
+out_path: /scratch/agjma/SPEED/Processed/seedv
+log_path: /scratch/agjma/SPEED/Processed/seedv/logs/seedv_log.txt
+
+
+# =============================================================================
+# Processing Options
+# =============================================================================
+overwrite: false
+shuffle_files: false
+n_jobs: 16
+file_extension: ".edf"
+log_level: INFO
+batch_size: 100
+
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - 16 subjects (open-source version), 117,744 total 1-second samples
+# - Original: .mat at 1000 Hz → converted to EDF → resampled to 200 Hz
+# - 62 EEG channels (BCMI NeuroScan ESI system)
+# - Train/Val/Test: 5 trials per session (session-wise cross-validation)
+# - Note: Open-source version has 16 subjects, not 20 as in private version

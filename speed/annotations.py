@@ -499,12 +499,14 @@ def parse_hmc_sleepscoring(
             try:
                 onset = float(row[2].strip())
                 duration = float(row[3].strip())
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as e:
+                logging.debug(f"Skipping unparseable row in {scoring_path}: {e}")
                 continue
             annotation = row[4].strip()
             if annotation in sleep_stages:
                 annotations.append((onset, duration, annotation))
 
+    logging.info(f"Parsed {len(annotations)} annotations from {scoring_path}")
     return annotations
 
 
@@ -564,6 +566,7 @@ def parse_isruc_annotations(
             try:
                 stage_int = int(line)
             except ValueError:
+                logging.debug(f"Skipping unparseable line {epoch_count} in {annotation_path}: {line!r}")
                 epoch_count += 1
                 continue
             label = label_map.get(stage_int)
@@ -572,6 +575,7 @@ def parse_isruc_annotations(
                 annotations.append((onset, 30.0, label))
             epoch_count += 1
 
+    logging.info(f"Parsed {len(annotations)} annotations from {annotation_path}")
     return annotations
 
 
@@ -682,9 +686,11 @@ def parse_tuev_annotations(
                     duration = end - start
                     if duration > 0:
                         annotations.append((start, duration, label))
-                except ValueError:
+                except ValueError as e:
+                    logging.debug(f"Skipping unparseable TSE line in {tse_path}: {line!r}")
                     continue
 
+    logging.info(f"Parsed {len(annotations)} annotations from {tse_path}")
     return annotations
 
 

@@ -7,22 +7,27 @@ This repository contains the source code and resources for the paper "[SPEED: Sc
 ![Lightning McQueen](speed.gif)
 
 ### Key Features:
-- **Scalable Preprocessing:** Efficient handling of large EEG datasets, such as the Temple University Hospital EEG Corpus.
-- **Self-Supervised Learning Compatibility:** Optimized for SSL frameworks to enhance model performance on various downstream tasks.
-- **Comprehensive Quality Assessment:** Includes several quality checks, such as bad channel detection, artifact removal (e.g., line noise), and ICA for component classification.
-- **Support for Multiple EEG Datasets:** Preprocessing steps tailored for TUH EEG, HBN, MMIDB, and other datasets.
+- **Scalable Preprocessing:** Efficient handling of large EEG datasets with parallel processing and HDF5 batching.
+- **Anti-Aliased Resampling:** Proper FIR-based resampling via MNE (no aliasing artifacts).
+- **17 Downstream Datasets:** Ready-to-use configs for EEGMMIDB, CHB-MIT, TUAB, TUEV, ISRUC, HMC, SEED-V, and more.
+- **Subject-Wise Splitting:** Prevent data leakage with `subject_wise_split()` for proper train/val/test separation.
+- **Evaluation Metrics:** Built-in balanced accuracy, AUROC, F1, Cohen's Kappa for benchmarking.
+- **Configurable Normalization:** Z-score, min-max, or robust normalization as a pipeline option.
+- **Comprehensive Quality Assessment:** Bad channel detection (RANSAC), line noise removal, ICA artifact rejection.
+- **Test Suite:** 29 tests with CI/CD via GitHub Actions.
 
 ## Repository Structure
 
-- `configs/`: Configuration files to customize the preprocessing pipeline (e.g., datasets, channels, filtering options).
-- `examples/`: Examples of how to use the SPEED pipeline, analyze results and load preprocessed data.
-- `notebooks/`: Development notebooks for pipeline testing and analysis.
-- `scripts/`: Utility scripts for preprocessing and data management.
-- `speed/`: Core preprocessing pipeline and methods.
-- `resources/`: Montage files and other resources.
+- `speed/`: Core preprocessing package (pipeline, methods, dataloader, metrics, annotations).
+- `configs/pretrain/`: Pretrain configs (TUH, HBN, example).
+- `configs/downstream/`: Downstream dataset configs (17 datasets).
+- `scripts/`: Main preprocessing scripts (`preprocess.py`, `preprocess_downstream.py`, `hdf5_combiner.py`).
+- `scripts/converters/`: Dataset format conversion scripts (MAT/TXT to EDF).
+- `tests/`: Test suite (pytest).
+- `examples/`: Usage examples for data loading and evaluation.
+- `docs/`: Downstream dataset reference documentation.
+- `resources/`: Montage files.
 - `slurm/`: SLURM job scripts for HPC environments.
-- `requirements.txt`: Python package dependencies.
-- `requirements_dev.txt`: Additional dependencies for development.
 
 ## How to Run the Pipeline
 
@@ -44,7 +49,7 @@ pip install -e .
 The preprocessing script handles large EEG datasets such as TUH EEG, HBN, and MMIDB. Configure paths and parameters in `configs/`.
 
 ```bash
-python scripts/preprocess.py --config configs/tuh.yaml
+python scripts/preprocess.py --config configs/pretrain/tuh.yaml
 ```
 
 This script will:
@@ -80,7 +85,7 @@ For downstream tasks where you need to preserve the original file structure, nam
 ### Usage
 
 ```bash
-python scripts/preprocess.py --config configs/downstream_example.yaml
+python scripts/preprocess.py --config configs/downstream/example.yaml
 ```
 
 ### Example Configuration
@@ -167,7 +172,62 @@ python scripts/preprocess.py \
 #           └── recording.edf    (preprocessed)
 ```
 
-See `configs/downstream_example.yaml` for a complete reference with all parameters.
+See `configs/downstream/example.yaml` for a complete reference with all parameters.
+
+---
+
+## Data Loading & Evaluation
+
+### Loading Preprocessed Data
+
+```python
+from speed import DownstreamDataset, get_dataloader
+
+dataset = DownstreamDataset('/path/to/processed_data')
+print(f"Samples: {len(dataset)}, Labels: {dataset.get_label_counts()}")
+
+loader = get_dataloader('/path/to/processed_data', batch_size=64)
+for data, labels in loader:
+    print(f"Batch: {data.shape}")  # (64, n_channels, n_samples)
+    break
+```
+
+### Subject-Wise Splitting (Preventing Data Leakage)
+
+```python
+from speed import DownstreamDataset, subject_wise_split, SUBJECT_EXTRACTORS
+
+dataset = DownstreamDataset('/path/to/processed_data')
+
+# Use dataset-specific subject extractor (or None for auto-detection)
+train, val, test = subject_wise_split(
+    dataset,
+    train_ratio=0.7, val_ratio=0.15, test_ratio=0.15,
+    subject_extractor=SUBJECT_EXTRACTORS['eegmmidb'],
+    seed=42
+)
+# No subject appears in more than one split
+```
+
+### Evaluation Metrics
+
+```python
+from speed import balanced_accuracy, auroc, f1_score, cohens_kappa, classification_report
+
+# After training and getting predictions:
+report = classification_report(y_true, y_pred, y_score=y_probs)
+# Returns: {'accuracy', 'balanced_accuracy', 'f1_macro', 'f1_weighted', 'cohens_kappa', 'auroc'}
+```
+
+### Normalization
+
+Add `normalize` to your config to normalize per-channel after resampling:
+
+```yaml
+pipeline:
+  init_args:
+    normalize: zscore   # Options: null, zscore, minmax, robust
+```
 
 ---
 
@@ -181,12 +241,15 @@ Orchestrates the entire preprocessing workflow. Takes configuration from `config
 ### `scripts/hdf5_combiner.py`
 Combines multiple HDF5 files from preprocessing into larger batches.
 
-### `examples/data_loader.ipynb`
-PyTorch dataloader class optimized for large-scale preprocessed data.
+### `speed/dataloader.py`
+PyTorch Dataset and DataLoader for downstream tasks. Includes `subject_wise_split()` for data leakage prevention.
+
+### `speed/metrics.py`
+Evaluation metrics for downstream benchmarking: balanced accuracy, AUROC, F1-score, Cohen's Kappa.
 
 ## Configuring the Preprocessing Pipeline
 
-The SPEED pipeline is configured using YAML files. See `configs/example.yaml` for all options.
+The SPEED pipeline is configured using YAML files. See `configs/pretrain/example.yaml` for all options.
 
 ### Example Configuration
 
@@ -249,6 +312,7 @@ save_as_hdf5: true
 - `do_ica`: Enable ICA artifact rejection.
 - `iclabel_threshold`: Probability threshold for IC classification (0-1).
 - `included_components`: IC types to retain (e.g., `["brain", "other"]`).
+- `normalize`: Normalization method after resampling: `null` (none), `"zscore"`, `"minmax"`, or `"robust"`.
 
 **Channel Settings:**
 - `montage`: `"tuh"`, standard MNE name (e.g., `"standard_1020"`), path to `.fif` file, or `null`.
@@ -284,23 +348,18 @@ save_as_hdf5: true
 - `file_extension`: File extensions to process (`.edf`, `.set`, or list).
 - `save_as_hdf5`: `true` = batch HDF5, `false` = individual BDF files.
 
-See `configs/example.yaml` for a complete reference with all parameters.
+See `configs/pretrain/example.yaml` for a complete reference with all parameters.
 
-## Datasets Used
+## Supported Datasets
 
-1. **[TUH EEG Corpus (TUEG)](https://isip.piconepress.com/projects/nedc/html/tuh_eeg/)**
-   - Largest publicly available EEG dataset with 26,846 recordings.
-   - Used for pretraining and fine-tuning.
+### Pretrain Datasets
+- **[TUH EEG Corpus (TUEG)](https://isip.piconepress.com/projects/nedc/html/tuh_eeg/)** — Largest publicly available EEG dataset (26,846 recordings).
+- **[Healthy Brain Network (HBN)](https://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/)** — Large pediatric neuroimaging dataset.
 
-2. **[Healthy Brain Network (HBN)](https://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/)**
-   - Large pediatric neuroimaging dataset.
-   - Supports `.set` file format.
+### Downstream Datasets (17 configs)
+Motor imagery, seizure detection, sleep staging, emotion recognition, abnormality detection, and more. Each has a ready-to-use config in `configs/downstream/`.
 
-3. **[Motor Movement/Imagery Dataset (MMIDB)](https://www.physionet.org/content/eegmmidb/1.0.0/)**
-   - Used for downstream benchmarking tasks like motor imagery classification.
-
-4. **[BCI Challenge @ NER 2015 (BCIC)](https://www.kaggle.com/c/inria-bci-challenge/data)**
-   - Smaller dataset for classification tasks involving feedback.
+See `docs/downstream_datasets.md` for the full reference with channels, sampling rates, labels, and processing notes.
 
 ## Links
 
