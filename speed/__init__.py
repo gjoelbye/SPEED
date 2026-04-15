@@ -26,6 +26,8 @@ from speed.metrics import (
     cohens_kappa,
     classification_report,
 )
+from speed.provenance import save_provenance
+from speed.report import generate_report
 
 __all__ = [
     # Pipelines
@@ -56,4 +58,7 @@ __all__ = [
     "f1_score",
     "cohens_kappa",
     "classification_report",
+    # Provenance and reports
+    "save_provenance",
+    "generate_report",
 ]

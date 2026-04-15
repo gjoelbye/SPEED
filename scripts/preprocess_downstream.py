@@ -20,7 +20,9 @@ import mne
 from tqdm import tqdm
 from jsonargparse import CLI
 
+from speed.cache import load_cache, save_cache, compute_input_hash, compute_config_hash, is_cached, update_cache
 from speed.pipeline import PretrainPipeline
+from speed.provenance import save_provenance
 from speed.utils import save_hdf5_with_labels
 
 
@@ -74,7 +76,8 @@ def preprocess_downstream(
     n_jobs: int = 1,
     overwrite: bool = False,
     shuffle_files: bool = False,
-    log_level: str = "INFO"
+    log_level: str = "INFO",
+    use_cache: bool = True,
 ) -> None:
     """
     Main preprocessing function for downstream tasks.
@@ -131,6 +134,26 @@ def preprocess_downstream(
     if len(file_paths) == 0:
         logging.warning("No files found to process")
         return
+
+    # Cache-based filtering
+    cache = {}
+    cfg_hash = None
+    if use_cache and not overwrite and file_paths:
+        cache = load_cache(str(out_path))
+        cfg_hash = compute_config_hash(pipeline)
+        original_count = len(file_paths)
+        filtered = []
+        for p in file_paths:
+            try:
+                ih = compute_input_hash(str(p))
+                if not is_cached(cache, str(p), ih, cfg_hash):
+                    filtered.append(p)
+            except OSError:
+                filtered.append(p)
+        cache_skipped = original_count - len(filtered)
+        if cache_skipped:
+            logging.info(f"Skipping {cache_skipped} files via cache.")
+        file_paths = filtered
 
     if shuffle_files:
         import random
@@ -204,6 +227,16 @@ def preprocess_downstream(
 
             logging.info(f"{file_path.name}: Extracted {len(raws)} windows")
 
+            # Update cache for successfully processed file
+            if use_cache:
+                if cfg_hash is None:
+                    cfg_hash = compute_config_hash(pipeline)
+                try:
+                    ih = compute_input_hash(str(file_path))
+                    update_cache(cache, str(file_path), ih, cfg_hash, str(out_path))
+                except OSError:
+                    pass
+
             # Save batch when full
             if len(all_raws) >= batch_size:
                 _save_batch(all_raws, all_labels, all_times, all_src_per_window, batch_id)
@@ -223,6 +256,31 @@ def preprocess_downstream(
     logging.info(f"Preprocessing complete. Total windows: {total_windows}")
     logging.info(f"Created {batch_id + 1} HDF5 files in {out_path}")
 
+    # Save cache
+    if use_cache and cache:
+        save_cache(str(out_path), cache)
+
+    # Save provenance
+    try:
+        config_dict = {
+            "pipeline": {
+                "class_path": type(pipeline).__module__ + "." + type(pipeline).__name__,
+                "init_args": {
+                    k: v for k, v in vars(pipeline).items()
+                    if not k.startswith("_")
+                },
+            },
+            "dataset_path": dataset_path,
+            "out_path": str(out_path),
+            "file_extension": file_extension,
+            "batch_size": batch_size,
+            "overwrite": overwrite,
+        }
+        n_output = batch_id + 1 if total_windows > 0 else 0
+        save_provenance(str(out_path), config_dict, len(file_paths), n_output)
+    except Exception as e:
+        logging.warning(f"Failed to save provenance: {e}")
+
 
 def main(
     pipeline: PretrainPipeline,
@@ -234,7 +292,8 @@ def main(
     n_jobs: int = 1,
     overwrite: bool = False,
     shuffle_files: bool = False,
-    log_level: str = "INFO"
+    log_level: str = "INFO",
+    use_cache: bool = True,
 ) -> None:
     """
     CLI entry point for downstream preprocessing.
@@ -277,7 +336,8 @@ def main(
         n_jobs=n_jobs,
         overwrite=overwrite,
         shuffle_files=shuffle_files,
-        log_level=log_level
+        log_level=log_level,
+        use_cache=use_cache,
     )
 
 

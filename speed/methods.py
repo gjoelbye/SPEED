@@ -95,22 +95,22 @@ class PreprocessMethods:
         
         Returns
         -------
-        passed : bool
-            True if recording passes quality checks.
+        rating : str
+            Quality rating: "good", "ok", or "bad".
         metrics : tuple
             (oha, thv, chv, bcr) quality metrics.
         """
         n_chans = raw.info['nchan']
         if n_chans < min_nchans:
-            return False, (1.0, 1.0, 1.0, 1.0)
-        
+            return "bad", (1.0, 1.0, 1.0, 1.0)
+
         raw = raw.copy()
-        
+
         # Detect discrete/flat channels
         min_unique = int(min_unique_ratio * raw.n_times)
         unique_counts = np.array([len(np.unique(chan_data)) for chan_data in raw._data])
         discrete_channels = np.array(raw.ch_names)[unique_counts < min_unique].tolist()
-        
+
         # Detect noisy channels
         noisychannels = pyprep.NoisyChannels(raw)
         noisychannels.find_bad_by_SNR()
@@ -118,35 +118,51 @@ class PreprocessMethods:
         noisychannels.find_bad_by_deviation()
         noisychannels.find_bad_by_hfnoise()
         noisychannels.find_bad_by_nan_flat()
-        
+
         # Apply simple filtering for metric calculation
         # Cap filter frequencies to Nyquist frequency
         sfreq = raw.info['sfreq']
         nyquist = sfreq / 2.0
-        
+
         # Filter line frequencies that are below Nyquist
         valid_line_freqs = [f for f in line_freqs if f < nyquist]
         if valid_line_freqs:
             raw.notch_filter(valid_line_freqs, verbose=False)
-        
+
         # Cap filter frequencies to be less than Nyquist
         effective_hp_freq = hp_freq if hp_freq is None or hp_freq < nyquist else None
         effective_lp_freq = lp_freq if lp_freq is None or lp_freq < nyquist else nyquist * 0.95
-        
+
         if effective_hp_freq is not None or effective_lp_freq is not None:
             raw.filter(effective_hp_freq, effective_lp_freq, verbose=False)
-        
+
         # Calculate quality metrics
         oha = np.mean(np.abs(raw._data) > oha_threshold)
         thv = np.mean(np.std(raw._data, axis=0) > thv_threshold)
         chv = np.mean(np.std(raw._data, axis=1) > chv_threshold)
-        
+
         # Bad channel ratio
         bad_channels = list(set(discrete_channels + noisychannels.get_bads()))
         bcr = len(bad_channels) / n_chans
-        
-        passed = (oha < oha_limit) & (thv < thv_limit) & (chv < chv_limit) & (bcr < bcr_limit)
-        return passed, (oha, thv, chv, bcr)
+
+        # Three-tier rating:
+        #   "good" — all metrics within strict limits
+        #   "bad"  — any metric exceeds 2x the strict limit
+        #   "ok"   — in between
+        strict_pass = (oha < oha_limit) and (thv < thv_limit) and (chv < chv_limit) and (bcr < bcr_limit)
+        relaxed_pass = (
+            (oha < 2 * oha_limit) and (thv < 2 * thv_limit)
+            and (chv < 2 * chv_limit) and (bcr < 2 * bcr_limit)
+        )
+
+        if strict_pass:
+            rating = "good"
+        elif relaxed_pass:
+            rating = "ok"
+        else:
+            rating = "bad"
+
+        return rating, (oha, thv, chv, bcr)
     
     # =========================================================================
     # Resampling

@@ -1,0 +1,44 @@
+# =============================================================================
+# CBraMod Preset
+# =============================================================================
+# Target model: CBraMod (Criss-Cross Brain Modelling)
+# Paper: https://arxiv.org/abs/2408.02724
+#
+# Preprocessing requirements:
+#   - Bandpass: 0.5-50 Hz
+#   - Resample: 200 Hz
+#   - No ICA
+#   - 19-channel standard 10-20 montage
+#   - 30-second windows
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    window_length: 30
+    shift_seconds: null
+    sfreq: 200.0
+
+    hp_freq: 0.5
+    lp_freq: 50.0
+    line_freqs: [60.0]
+
+    do_ica: false
+
+    montage: tuh
+    channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, T5, P3, Pz, P4, T6, O1, O2]
+    standardize_channel_names: true
+
+    drop_bad_quality: true
+    return_quality_metrics: true
+    normalize: null
+
+dataset_path: /path/to/dataset
+out_path: /path/to/output
+log_path: /path/to/output/log.txt
+metrics_path: /path/to/output/
+
+batch_size: 10
+n_jobs: 6
+file_extension: ".edf"
+save_as_hdf5: true

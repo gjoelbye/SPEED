@@ -14,7 +14,10 @@ from tqdm import tqdm
 from joblib import Parallel, delayed
 from jsonargparse import CLI
 
+from speed.cache import load_cache, save_cache, compute_input_hash, compute_config_hash, is_cached, update_cache
 from speed.pipeline import PretrainPipeline
+from speed.provenance import save_provenance
+from speed.report import generate_report as _generate_report
 from speed.utils import (
     save_hdf5,
     write_bdf_from_raw,
@@ -283,7 +286,9 @@ def preprocess_dataset(
     fallback_format: str = "edf",
     skip_on_quality_fail: bool = False,
     copy_other_files: bool = False,
-    exclude_patterns: Optional[List[str]] = None
+    exclude_patterns: Optional[List[str]] = None,
+    use_cache: bool = True,
+    generate_report: bool = False,
 ):
     """
     Preprocess an EEG dataset.
@@ -362,6 +367,28 @@ def preprocess_dataset(
             msg = f"Skipping {skipped} already processed files."
             logging.info(msg)
             print(msg)
+
+    # Cache-based filtering
+    cache = {}
+    cfg_hash = None
+    if use_cache and not overwrite and src_paths:
+        cache = load_cache(str(out_path_obj))
+        cfg_hash = compute_config_hash(pipeline)
+        original_count = len(src_paths)
+        filtered = []
+        for p in src_paths:
+            try:
+                ih = compute_input_hash(str(p))
+                if not is_cached(cache, str(p), ih, cfg_hash):
+                    filtered.append(p)
+            except OSError:
+                filtered.append(p)
+        cache_skipped = original_count - len(filtered)
+        if cache_skipped:
+            msg = f"Skipping {cache_skipped} files via cache."
+            logging.info(msg)
+            print(msg)
+        src_paths = filtered
     
     msg = f"Files to process: {len(src_paths)}"
     logging.info(msg)
@@ -409,7 +436,20 @@ def preprocess_dataset(
             summary = ", ".join(f"{k}: {v}" for k, v in sorted(status_counts.items()))
             logging.info(f"Processing complete. {summary}")
             print(f"\nProcessing complete. {summary}")
-        
+
+            # Update cache for successfully processed files
+            if use_cache:
+                if cfg_hash is None:
+                    cfg_hash = compute_config_hash(pipeline)
+                for r, src in zip(results, src_paths):
+                    if r["status"] == "success":
+                        try:
+                            ih = compute_input_hash(str(src))
+                            update_cache(cache, str(src), ih, cfg_hash, r["dest_path"])
+                        except OSError:
+                            pass
+                save_cache(str(out_path_obj), cache)
+
         else:
             # Pretrain mode: batch into HDF5/BDF
             if not save_as_hdf5:
@@ -442,6 +482,20 @@ def preprocess_dataset(
             
             print(f"Completed {len(results)} / {len(jobs)} batches.")
             logging.info(f"Completed {len(results)} / {len(jobs)} batches.")
+
+            # Update cache for all processed files in batches
+            if use_cache:
+                if cfg_hash is None:
+                    cfg_hash = compute_config_hash(pipeline)
+                for batch, dest in zip(batches, dest_paths if save_as_hdf5 else [out_path_obj / f"{b[0].stem}.bdf" for b in batches]):
+                    if dest.exists():
+                        for src in batch:
+                            try:
+                                ih = compute_input_hash(str(src))
+                                update_cache(cache, str(src), ih, cfg_hash, str(dest))
+                            except OSError:
+                                pass
+                save_cache(str(out_path_obj), cache)
     
     # Copy non-EEG files (downstream mode only)
     if copy_other_files and preserve_structure and os.path.isdir(dataset_path):
@@ -458,6 +512,45 @@ def preprocess_dataset(
         print(f"Skipped {len(copy_stats['skipped'])} existing files.")
         print(f"Excluded {len(copy_stats['excluded'])} files by pattern.")
     
+    # Save provenance
+    try:
+        config_dict = {
+            "pipeline": {
+                "class_path": type(pipeline).__module__ + "." + type(pipeline).__name__,
+                "init_args": {
+                    k: v for k, v in vars(pipeline).items()
+                    if not k.startswith("_")
+                },
+            },
+            "dataset_path": dataset_path,
+            "out_path": out_path,
+            "overwrite": overwrite,
+            "n_jobs": n_jobs,
+            "file_extension": file_extension,
+            "batch_size": batch_size,
+            "save_as_hdf5": save_as_hdf5,
+            "preserve_structure": preserve_structure,
+        }
+        n_output = len(list(Path(out_path).rglob("*.hdf5"))) + len(list(Path(out_path).rglob("*.edf"))) + len(list(Path(out_path).rglob("*.bdf")))
+        save_provenance(out_path, config_dict, len(src_paths), n_output)
+    except Exception as e:
+        logging.warning(f"Failed to save provenance: {e}")
+
+    # Generate HTML quality report
+    if generate_report and metrics_path:
+        try:
+            metrics_csv = Path(metrics_path)
+            if metrics_csv.suffix == '.csv':
+                metrics_csv = metrics_csv.parent
+            csv_file = metrics_csv / "quality_metrics.csv"
+            if csv_file.exists():
+                qm = pd.read_csv(csv_file).to_dict("records")
+                report_path = out_path_obj / "speed_report.html"
+                _generate_report(qm, output_path=str(report_path))
+                print(f"Quality report: {report_path}")
+        except Exception as e:
+            logging.warning(f"Failed to generate report: {e}")
+
     print("\nDone!")
     logging.info("Preprocessing complete.")
 

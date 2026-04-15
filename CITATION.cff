@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "SPEED: Scalable Preprocessing of EEG Data for Self-Supervised Learning"
+type: software
+license: CC-BY-4.0
+url: "https://github.com/AndersGMadsen/SPEED"
+repository-code: "https://github.com/AndersGMadsen/SPEED"
+authors:
+  - family-names: Gjølbye
+    given-names: Anders
+  - family-names: Skerath
+    given-names: Lina
+  - family-names: Lehn-Schiøler
+    given-names: William
+  - family-names: Langer
+    given-names: Nicolas
+  - family-names: Hansen
+    given-names: Lars Kai
+preferred-citation:
+  type: conference-paper
+  title: "SPEED: Scalable Preprocessing of EEG Data for Self-Supervised Learning"
+  authors:
+    - family-names: Gjølbye
+      given-names: Anders
+    - family-names: Skerath
+      given-names: Lina
+    - family-names: Lehn-Schiøler
+      given-names: William
+    - family-names: Langer
+      given-names: Nicolas
+    - family-names: Hansen
+      given-names: Lars Kai
+  collection-title: "2024 IEEE International Workshop on Machine Learning for Signal Processing (MLSP)"
+  year: 2024
+  identifiers:
+    - type: other
+      value: "arXiv:2408.08065"
+      description: "arXiv preprint"

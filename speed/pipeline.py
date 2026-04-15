@@ -117,6 +117,7 @@ class BasePipeline(Pipeline):
         chv_threshold: float = 80e-6,
         min_unique_ratio: float = 0.001,
         drop_bad_quality: bool = True,
+        include_ok_quality: bool = True,
         return_quality_metrics: bool = False,
         # Quality decision thresholds
         oha_limit: float = 0.8,
@@ -158,6 +159,7 @@ class BasePipeline(Pipeline):
         self.chv_threshold = chv_threshold
         self.min_unique_ratio = min_unique_ratio
         self.drop_bad_quality = drop_bad_quality
+        self.include_ok_quality = include_ok_quality
         self.return_quality_metrics = return_quality_metrics
         
         # Quality decision limits
@@ -283,7 +285,8 @@ class BasePipeline(Pipeline):
         filename: Union[str, Path],
         start_time: float,
         end_time: float,
-        metrics: Optional[Tuple]
+        metrics: Optional[Tuple],
+        quality_rating: Optional[str] = None,
     ) -> None:
         """Add a quality metric entry to the buffer."""
         oha, thv, chv, bcr = metrics if metrics else (None, None, None, None)
@@ -295,6 +298,7 @@ class BasePipeline(Pipeline):
             "thv": thv,
             "chv": chv,
             "bcr": bcr,
+            "quality_rating": quality_rating,
         })
 
 
@@ -517,17 +521,19 @@ class PretrainPipeline(BasePipeline):
             # Run quality check first (if needed for metrics or skip logic)
             quality_passed = True
             quality_metrics = None
+            quality_rating = None
             did_quality_check = False
-            
+
             if self.return_quality_metrics or skip_on_quality_fail:
-                quality_passed, quality_metrics = self._evaluate_quality(raw)
+                quality_rating, quality_metrics = self._evaluate_quality(raw)
+                quality_passed = quality_rating != "bad"
                 did_quality_check = True
-                
+
                 if self.return_quality_metrics:
-                    self._add_quality_metric(src_path, 0.0, raw.times[-1], quality_metrics)
-                
+                    self._add_quality_metric(src_path, 0.0, raw.times[-1], quality_metrics, quality_rating)
+
                 if not quality_passed and skip_on_quality_fail:
-                    logging.info(f"{info_str} Quality check failed. Skipping.")
+                    logging.info(f"{info_str} Quality rating: {quality_rating}. Skipping.")
                     return None, quality_metrics, False
             
             # Process (skip quality check only if we already did it above)
@@ -809,10 +815,10 @@ class PretrainPipeline(BasePipeline):
 
         # Quality check
         if not skip_quality_check:
-            passed, metrics = self._run_quality_check(raw, info_str)
+            passed, metrics, rating = self._run_quality_check(raw, info_str)
 
             if self.return_quality_metrics:
-                self._add_quality_metric(filename, 0.0, raw.times[-1], metrics)
+                self._add_quality_metric(filename, 0.0, raw.times[-1], metrics, rating)
 
             if not passed:
                 return None
@@ -959,27 +965,33 @@ class PretrainPipeline(BasePipeline):
         self,
         raw: mne.io.Raw,
         info_str: str
-    ) -> Tuple[bool, Optional[Tuple]]:
+    ) -> Tuple[bool, Optional[Tuple], Optional[str]]:
         """
         Run quality check on raw data.
-        
+
         Returns
         -------
         passed : bool
             Whether the window passed quality checks.
         metrics : tuple or None
             Quality metrics (oha, thv, chv, bcr) if computed.
+        rating : str or None
+            Quality rating: "good", "ok", or "bad".
         """
         if not (self.return_quality_metrics or self.drop_bad_quality):
-            return True, None
-        
-        quality, metrics = self._evaluate_quality(raw)
-        
-        if self.drop_bad_quality and not quality:
-            logging.info(f"{info_str} Quality check failed. Dropping window.")
-            return False, metrics
-        
-        return True, metrics
+            return True, None, None
+
+        rating, metrics = self._evaluate_quality(raw)
+
+        if self.drop_bad_quality and rating == "bad":
+            logging.info(f"{info_str} Quality rating: bad. Dropping window.")
+            return False, metrics, rating
+
+        if self.drop_bad_quality and not self.include_ok_quality and rating == "ok":
+            logging.info(f"{info_str} Quality rating: ok. Dropping window (include_ok_quality=False).")
+            return False, metrics, rating
+
+        return True, metrics, rating
     
     def _restore_metadata(
         self,

@@ -350,6 +350,25 @@ save_as_hdf5: true
 
 See `configs/pretrain/example.yaml` for a complete reference with all parameters.
 
+## Foundation Model Presets
+
+Ready-to-use preprocessing configs for popular EEG foundation models are available in `configs/presets/`:
+
+| Preset | Bandpass | Resample | ICA | Windows | Normalization | Target Model |
+|--------|----------|----------|-----|---------|---------------|--------------|
+| `labram.yaml` | 0.1–75 Hz | 200 Hz | Off | 60s | None | [LaBraM](https://arxiv.org/abs/2405.18765) |
+| `cbramod.yaml` | 0.5–50 Hz | 200 Hz | Off | 30s | None | [CBraMod](https://arxiv.org/abs/2408.02724) |
+| `biot.yaml` | 0.5–45 Hz | 200 Hz | Off | 10s | None | [BIOT](https://arxiv.org/abs/2305.18314) |
+| `reve.yaml` | 0.5–100 Hz | 256 Hz | Off | 60s | Z-score | [REVE](https://arxiv.org/abs/2410.08211) |
+
+Usage:
+```bash
+python scripts/preprocess.py --config configs/presets/labram.yaml \
+    --dataset_path /data/tuh/ --out_path /data/tuh_labram/
+```
+
+All presets use the standard 19-channel 10-20 montage and TUH channel name standardization.
+
 ## Supported Datasets
 
 ### Pretrain Datasets
