@@ -201,6 +201,28 @@ def preprocess_downstream(
 
         logging.info(f"Batch {batch_id}: Saved {len(raws)} windows to {hdf5_path}")
 
+    def _commit_batch_cache(cache_dict, src_per_window):
+        """Persist cache entries for every file contributing to the just-saved batch.
+
+        Called only after _save_batch succeeds, so the cache on disk reflects
+        exactly the files whose windows are in persisted HDF5 files. Cheap:
+        one atomic JSON write (~1 MB for a completed CCD run) per batch, i.e.
+        roughly once per 100 windows / ~5 files.
+        """
+        nonlocal cfg_hash
+        if not use_cache or not src_per_window:
+            return
+        if cfg_hash is None:
+            cfg_hash = compute_config_hash(pipeline)
+        # dict.fromkeys preserves insertion order while deduplicating.
+        for fp in dict.fromkeys(src_per_window):
+            try:
+                ih = compute_input_hash(str(fp))
+                update_cache(cache_dict, str(fp), ih, cfg_hash, str(out_path))
+            except OSError:
+                pass
+        save_cache(str(out_path), cache_dict)
+
     for file_path in tqdm(file_paths, desc="Processing files"):
         try:
             result = pipeline.run([str(file_path)])
@@ -227,20 +249,14 @@ def preprocess_downstream(
 
             logging.info(f"{file_path.name}: Extracted {len(raws)} windows")
 
-            # Update cache for successfully processed file
-            if use_cache:
-                if cfg_hash is None:
-                    cfg_hash = compute_config_hash(pipeline)
-                try:
-                    ih = compute_input_hash(str(file_path))
-                    update_cache(cache, str(file_path), ih, cfg_hash, str(out_path))
-                except OSError:
-                    pass
-
-            # Save batch when full
+            # Save batch when full. Cache entries for files whose windows end
+            # up in this batch are persisted here (see _commit_batch_cache) so
+            # that a SIGTERM between batch flushes cannot leave the cache
+            # claiming a file is done while its windows are still in memory.
             if len(all_raws) >= batch_size:
                 _save_batch(all_raws, all_labels, all_times, all_src_per_window, batch_id)
                 total_windows += len(all_raws)
+                _commit_batch_cache(cache, all_src_per_window)
                 batch_id += 1
                 all_raws, all_labels, all_times, all_src_per_window = [], [], [], []
 
@@ -248,17 +264,14 @@ def preprocess_downstream(
             logging.error(f"Error processing {file_path.name}: {e}")
             continue
 
-    # Save remaining windows
+    # Save remaining windows and persist cache entries for their files.
     if len(all_raws) > 0:
         _save_batch(all_raws, all_labels, all_times, all_src_per_window, batch_id)
         total_windows += len(all_raws)
+        _commit_batch_cache(cache, all_src_per_window)
 
     logging.info(f"Preprocessing complete. Total windows: {total_windows}")
     logging.info(f"Created {batch_id + 1} HDF5 files in {out_path}")
-
-    # Save cache
-    if use_cache and cache:
-        save_cache(str(out_path), cache)
 
     # Save provenance
     try:

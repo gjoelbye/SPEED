@@ -15,6 +15,8 @@ from speed.annotations import (
     parse_eegmat_annotations, parse_hmc_sleepscoring, parse_isruc_annotations,
     parse_mumtaz2016_annotations, parse_tuev_annotations, parse_tuab_annotations,
     parse_bcic_iv_2a_events, parse_shu_mi_events, parse_siena_seizures,
+    parse_hbn_ccd_rt, parse_hbn_ccd_correct, parse_hbn_cbcl,
+    parse_hbn_rest_ec_eo, parse_hbn_surroundsupp, parse_hbn_symbolsearch,
 )
 
 
@@ -581,6 +583,14 @@ class PretrainPipeline(BasePipeline):
 
         Returns the (potentially replaced) raw object.
         """
+        # Snapshot the original channel info (names + sensor locations) before
+        # any drops or renames. PreprocessMethods.interpolate_missing reads this
+        # as a fallback when self.montage is None (e.g. HBN, whose sensor
+        # positions are embedded in the .set file rather than a named montage),
+        # so that RANSAC-dropped channels can be re-added with valid `loc`
+        # arrays and then filled by MNE's interpolate_bads.
+        raw._original_info = raw.info.copy()
+
         # Bipolar-to-monopolar conversion (e.g., CHBMIT, TUEV, TUAB)
         # Must happen before standardize_channel_names and set_montage
         if self.bipolar_to_monopolar:
@@ -740,6 +750,31 @@ class PretrainPipeline(BasePipeline):
                 raw.annotations.append(onset, duration, 'seizure')
             for onset, label in non_seizure_events:
                 raw.annotations.append(onset, self.event_tlen, label)
+
+        elif self.annotation_format.startswith('hbn_'):
+            # HBN: parsers read events.tsv (and participants.tsv for CBCL).
+            # Replace existing EEGLAB annotations so split_raw_annotations
+            # does not pick up `boundary`, `break cnt`, etc. as windows.
+            if self.annotation_format == 'hbn_ccd_rt':
+                events = parse_hbn_ccd_rt(src_path, self.event_tlen)
+            elif self.annotation_format == 'hbn_ccd_correct':
+                events = parse_hbn_ccd_correct(src_path, self.event_tlen)
+            elif self.annotation_format == 'hbn_cbcl':
+                events = parse_hbn_cbcl(src_path, raw.times[-1], self.event_tlen)
+            elif self.annotation_format == 'hbn_rest_ec_eo':
+                events = parse_hbn_rest_ec_eo(src_path, raw.times[-1], self.event_tlen)
+            elif self.annotation_format == 'hbn_surroundsupp':
+                events = parse_hbn_surroundsupp(src_path, self.event_tlen)
+            elif self.annotation_format == 'hbn_symbolsearch':
+                events = parse_hbn_symbolsearch(src_path, self.event_tlen)
+            else:
+                raise ValueError(f"Unknown HBN annotation_format: {self.annotation_format}")
+
+            raw.set_annotations(mne.Annotations(
+                onset=[float(e[0]) for e in events],
+                duration=[float(e[1]) for e in events],
+                description=[e[2] for e in events],
+            ))
 
         # 2. Extract windows using split_raw_annotations utility
         windows, time_slices, descriptions = split_raw_annotations(

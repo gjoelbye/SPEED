@@ -316,6 +316,9 @@ SUBJECT_EXTRACTORS = {
     'mobi': lambda f: f.split('_')[0],
     'bcic_iv_2a': lambda f: f.split('_')[0],
     'bcic2020_iv_3': lambda f: f.split('_')[0],
+    # HBN stems look like "sub-NDARAC904DMU_task-Y_[run-Z_]eeg"; the subject
+    # id is the leading "sub-<ALPHANUM>" segment.
+    'hbn': lambda f: re.match(r'^(sub-[A-Z0-9]+)', f).group(1) if re.match(r'^(sub-[A-Z0-9]+)', f) else f.split('_')[0],
 }
 
 

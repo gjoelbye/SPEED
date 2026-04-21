@@ -102,6 +102,11 @@ def _create_window_raw(
     window_raw = mne.io.RawArray(data, info, verbose=False)
     if montage is not None:
         window_raw.set_montage(montage)
+    # Propagate the original-info snapshot (see pipeline._preprocess_channels)
+    # so PreprocessMethods.interpolate_missing can restore sensor locations
+    # for RANSAC-dropped channels on window-level runs.
+    if hasattr(raw, "_original_info"):
+        window_raw._original_info = raw._original_info
     return window_raw
 
 

@@ -11,15 +11,18 @@ This module provides parsers for dataset-specific annotation formats:
 - TUEV: TUH EEG event annotations from .tse files
 - TUAB: TUH abnormal/normal labels from directory structure
 - BCIC-IV-2a: Motor imagery events from GDF event markers
+- HBN: Healthy Brain Network (CCD, RestingState, surroundSupp, symbolSearch, CBCL)
 """
 
 import csv
+import functools
 import logging
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import List, Tuple, Optional
 import mne
 import numpy as np
+import pandas as pd
 import re
 
 
@@ -969,3 +972,391 @@ def parse_siena_seizures(
 
 # Backward compatibility alias
 convert_chbmit_bipolar_to_average = convert_chbmit_bipolar_to_monopolar
+
+
+# =============================================================================
+# HBN (Healthy Brain Network) parsers
+# =============================================================================
+#
+# HBN-EEG is a BIDS dataset: each recording lives at
+#   <release>/sub-XXX/eeg/sub-XXX_task-Y[_run-Z]_eeg.set
+# with a sibling events.tsv and a release-level participants.tsv containing
+# subject-level CBCL psychopathology scores.
+#
+# The .set file carries annotations whose descriptions equal the events.tsv
+# `value` column, but auxiliary columns (`feedback`, `stimulus_cond`,
+# `user_answer`, `correct_answer`, ...) are only present in events.tsv. All
+# HBN parsers therefore read events.tsv directly.
+#
+# Each HBN branch of PretrainPipeline._extract_event_windows() clears the
+# existing annotations (so EEGLAB `boundary` markers don't become spurious
+# windows) before writing the parser's output.
+
+# Expected CCD feedback value domain (verified empirically on 60 files across
+# 3 releases: smiley_face=correct / sad_face=incorrect / non_target=false alarm).
+_HBN_CCD_FEEDBACK_CORRECT = "smiley_face"
+_HBN_CCD_FEEDBACK_INCORRECT = "sad_face"
+# RT filter: observed p1 = 0.45 s, the <0.25 s tail is dominated by
+# anticipatory / accidental presses; drop them from regression targets.
+_HBN_CCD_MIN_RT = 0.25
+
+# EEGDash hbn_ec_ec_reannotation offsets (relative to the instruction onset).
+_HBN_REST_EC_OFFSETS = (15.0, 17.0, 19.0, 21.0, 23.0, 25.0, 27.0, 29.0)
+_HBN_REST_EO_OFFSETS = (5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0)
+
+# CBCL columns attached to every window of a recording.
+_HBN_CBCL_COLUMNS = ("p_factor", "attention", "internalizing", "externalizing")
+
+
+def _hbn_resolve_events_tsv(src_path: Path) -> Path:
+    """
+    Return the events.tsv sibling for an HBN .set recording.
+
+    Parameters
+    ----------
+    src_path : Path
+        Path to the .set file, e.g. sub-XXX/eeg/sub-XXX_task-Y_run-1_eeg.set
+
+    Returns
+    -------
+    Path
+        Path to the matching events.tsv file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the expected events.tsv does not exist.
+    """
+    # Strip "_eeg.set" and append "_events.tsv"
+    stem = src_path.name
+    if not stem.endswith("_eeg.set"):
+        raise ValueError(f"HBN recording must end with _eeg.set: {stem}")
+    events_name = stem[: -len("_eeg.set")] + "_events.tsv"
+    events_path = src_path.parent / events_name
+    if not events_path.is_file():
+        raise FileNotFoundError(f"HBN events.tsv not found for {src_path}: {events_path}")
+    return events_path
+
+
+@functools.lru_cache(maxsize=32)
+def _hbn_load_participants(participants_tsv: Path) -> pd.DataFrame:
+    """
+    Read a participants.tsv and index it by participant_id (cached by path).
+
+    Note: lru_cache keys on the Path, so repeated calls for the same release
+    avoid re-parsing the ~300–500-row TSV for every subject in that release.
+    """
+    df = pd.read_csv(participants_tsv, sep="\t")
+    if "participant_id" not in df.columns:
+        raise ValueError(
+            f"participants.tsv at {participants_tsv} lacks a participant_id column"
+        )
+    return df.set_index("participant_id")
+
+
+def _hbn_find_participants_tsv(src_path: Path) -> Path:
+    """
+    Walk upwards from src_path until a participants.tsv is found.
+
+    HBN layout places participants.tsv at the release root:
+      <release>/participants.tsv
+      <release>/sub-XXX/eeg/sub-XXX_task-Y_eeg.set
+
+    Raises
+    ------
+    FileNotFoundError
+        If no participants.tsv is found within 5 parents.
+    """
+    for parent in list(src_path.parents)[:5]:
+        cand = parent / "participants.tsv"
+        if cand.is_file():
+            return cand
+    raise FileNotFoundError(f"No participants.tsv found in ancestors of {src_path}")
+
+
+def _hbn_subject_id(src_path: Path) -> str:
+    """Extract the BIDS subject id (sub-XXX) from a .set path."""
+    # .set files live at <...>/sub-XXX/eeg/sub-XXX_task-Y_eeg.set
+    # The grandparent directory name is the subject id.
+    try:
+        return src_path.parent.parent.name
+    except AttributeError:
+        raise ValueError(f"Cannot derive subject id from {src_path}")
+
+
+def _hbn_read_events(events_tsv: Path) -> pd.DataFrame:
+    """Read and sort an HBN events.tsv by onset. Coerces onset to float."""
+    df = pd.read_csv(events_tsv, sep="\t")
+    df["onset"] = pd.to_numeric(df["onset"], errors="coerce")
+    df = df.dropna(subset=["onset"])
+    return df.sort_values("onset", kind="mergesort").reset_index(drop=True)
+
+
+def _hbn_ccd_pair_trials(events_df: pd.DataFrame) -> List[Tuple[float, float, float, Optional[str]]]:
+    """
+    Pair CCD events.tsv rows into (trial_start, stimulus_onset, response_onset, feedback) tuples.
+
+    Trials are bounded by consecutive `contrastTrial_start` events (or the
+    recording end). Within each trial, we take the first stimulus
+    (`left_target` / `right_target`) and the first buttonPress at or after
+    that stimulus. `end_experiment` is not emitted by HBN in practice
+    (empirically 0/60 files across 3 releases), so the final trial's upper
+    bound defaults to a large sentinel and windowing truncation catches the
+    recording end naturally.
+
+    Returns only trials with both stimulus and response; trials missing
+    either are dropped (~17 % of trials empirically).
+    """
+    trials = events_df.loc[events_df["value"] == "contrastTrial_start", "onset"].to_numpy()
+    stim_mask = events_df["value"].isin(["left_target", "right_target"])
+    resp_mask = events_df["value"].isin(["left_buttonPress", "right_buttonPress"])
+    feedback_col = events_df["feedback"] if "feedback" in events_df.columns else None
+
+    end_rows = events_df.loc[events_df["value"] == "end_experiment", "onset"].to_numpy()
+    recording_end = float(end_rows[0]) if len(end_rows) else float("inf")
+
+    out = []
+    for i, t0 in enumerate(trials):
+        t1 = float(trials[i + 1]) if i + 1 < len(trials) else recording_end
+        stim_idx = events_df.index[stim_mask & (events_df["onset"] >= t0) & (events_df["onset"] < t1)]
+        if len(stim_idx) == 0:
+            continue
+        stim_i = stim_idx[0]
+        stim_on = float(events_df.loc[stim_i, "onset"])
+        resp_idx = events_df.index[resp_mask & (events_df["onset"] >= stim_on) & (events_df["onset"] < t1)]
+        if len(resp_idx) == 0:
+            continue
+        resp_i = resp_idx[0]
+        resp_on = float(events_df.loc[resp_i, "onset"])
+        fb = None
+        if feedback_col is not None:
+            fb_val = feedback_col.loc[resp_i]
+            if pd.notna(fb_val):
+                fb = str(fb_val)
+        out.append((float(t0), stim_on, resp_on, fb))
+    return out
+
+
+def parse_hbn_ccd_rt(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[float, float, str]]:
+    """
+    Extract CCD reaction-time regression annotations (eeg2025 Challenge 1 style).
+
+    Each valid trial yields one annotation at the stimulus onset with
+    description ``f"rt_{rt:.6f}"`` where
+    ``rt = response_onset - stimulus_onset``. SPEED's regression decoder
+    parses the description by splitting on '_' and converting suffix tokens
+    to floats, so the yaml config should set ``task_type: regression`` and
+    ``event_tmin: 0.5`` (start the window 0.5 s after stimulus onset).
+
+    Trials missing the stimulus or the response are dropped (~17 % of
+    trials empirically). Trials with RT < 0.25 s are dropped as
+    anticipatory/accidental presses (below the empirical p1 of the RT
+    distribution).
+
+    Returns
+    -------
+    List of (onset_seconds, duration_seconds, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    out = []
+    for _t0, stim_on, resp_on, _fb in _hbn_ccd_pair_trials(events_df):
+        rt = resp_on - stim_on
+        if rt < _HBN_CCD_MIN_RT:
+            continue
+        out.append((stim_on, float(event_tlen), f"rt_{rt:.6f}"))
+    return out
+
+
+def parse_hbn_ccd_correct(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[float, float, str]]:
+    """
+    Extract CCD trial-correctness classification annotations.
+
+    Label = 'correct' if the response's feedback is `smiley_face`,
+    'incorrect' if `sad_face`. `non_target` (false alarms outside a
+    proper target window) and trials without a response are skipped.
+
+    The config aligns the 2-s window around the target onset via
+    ``event_tmin: -0.5`` (→ window spans [-0.5, +1.5] s relative to
+    stimulus).
+
+    Returns
+    -------
+    List of (stim_onset, duration, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    out = []
+    for _t0, stim_on, _resp_on, fb in _hbn_ccd_pair_trials(events_df):
+        if fb == _HBN_CCD_FEEDBACK_CORRECT:
+            label = "correct"
+        elif fb == _HBN_CCD_FEEDBACK_INCORRECT:
+            label = "incorrect"
+        else:
+            # `non_target` or missing feedback — skip.
+            continue
+        out.append((stim_on, float(event_tlen), label))
+    return out
+
+
+def parse_hbn_cbcl(
+    src_path: Path,
+    recording_duration: float,
+    event_tlen: float = 2.0,
+    stride: float = 2.0,
+) -> List[Tuple[float, float, str]]:
+    """
+    Fixed-window CBCL regression annotations (eeg2025 Challenge 2 style).
+
+    Reads the subject-level CBCL scores from the release's participants.tsv
+    and emits one annotation per fixed-stride window covering the whole
+    recording. Annotation descriptions are encoded as
+    ``f"cbcl_{p_factor}_{attention}_{internalizing}_{externalizing}"`` so
+    SPEED's regression decoder yields a 4-D float target per window.
+
+    If any of the four CBCL columns is NaN for this subject (~1.5 % of the
+    3,602 HBN subjects), returns an empty list — the recording is then
+    skipped entirely by the dispatcher.
+
+    Returns
+    -------
+    List of (onset, duration, description) tuples.
+    """
+    if recording_duration < event_tlen:
+        return []
+    participants_tsv = _hbn_find_participants_tsv(src_path)
+    participants = _hbn_load_participants(participants_tsv)
+    subject_id = _hbn_subject_id(src_path)
+    if subject_id not in participants.index:
+        logging.warning(f"HBN CBCL: {subject_id} not in {participants_tsv}; skipping.")
+        return []
+    row = participants.loc[subject_id]
+    values = [row.get(col, np.nan) for col in _HBN_CBCL_COLUMNS]
+    if any(pd.isna(v) for v in values):
+        logging.info(f"HBN CBCL: {subject_id} has NaN CBCL; skipping.")
+        return []
+    desc = "cbcl_" + "_".join(f"{float(v):.6f}" for v in values)
+    out = []
+    onset = 0.0
+    while onset + event_tlen <= recording_duration:
+        out.append((float(onset), float(event_tlen), desc))
+        onset += stride
+    return out
+
+
+def parse_hbn_rest_ec_eo(
+    src_path: Path,
+    recording_duration: float,
+    event_tlen: float = 2.0,
+) -> List[Tuple[float, float, str]]:
+    """
+    RestingState eyes-closed / eyes-open re-annotation (EEGDash-style).
+
+    After each `instructed_toCloseEyes` row, emits 8 × 2 s windows at
+    offsets {15, 17, ..., 29} s with description ``eyes_closed``. After
+    each `instructed_toOpenEyes` row, emits 8 × 2 s windows at offsets
+    {5, 7, ..., 19} s with description ``eyes_open``. Windows that would
+    extend past ``recording_duration`` are clipped (drops ~0–2 windows in
+    the shortest recordings, empirically 343 s minimum).
+
+    A typical HBN RestingState recording has 5 EC + 6 EO instructions →
+    40 + 48 = 88 windows per file.
+
+    Returns
+    -------
+    List of (onset, duration, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    out = []
+    for _, row in events_df.iterrows():
+        val = str(row["value"])
+        t = float(row["onset"])
+        if val == "instructed_toCloseEyes":
+            offsets = _HBN_REST_EC_OFFSETS
+            label = "eyes_closed"
+        elif val == "instructed_toOpenEyes":
+            offsets = _HBN_REST_EO_OFFSETS
+            label = "eyes_open"
+        else:
+            continue
+        for off in offsets:
+            w_on = t + off
+            if w_on + event_tlen > recording_duration:
+                continue
+            out.append((w_on, float(event_tlen), label))
+    return out
+
+
+def parse_hbn_surroundsupp(
+    src_path: Path,
+    event_tlen: float = 2.0,
+) -> List[Tuple[float, float, str]]:
+    """
+    surroundSupp stimulus-condition classification annotations.
+
+    Emits one annotation per `stim_ON` row with description
+    ``f"stimcond_{int(stimulus_cond)}"`` for
+    ``stimulus_cond ∈ {1, 2, 3}``. Rows whose `stimulus_cond` is n/a are
+    skipped.
+
+    Empirically each run contains 64 `stim_ON` events, each already marked
+    with duration=2.4 s; we override to `event_tlen` for consistency with
+    the other configs.
+
+    Returns
+    -------
+    List of (onset, duration, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    if "stimulus_cond" not in events_df.columns:
+        logging.warning(f"surroundSupp: no stimulus_cond column in {events_tsv}")
+        return []
+    stim = events_df[events_df["value"] == "stim_ON"]
+    cond = pd.to_numeric(stim["stimulus_cond"], errors="coerce")
+    out = []
+    for onset, c in zip(stim["onset"].to_numpy(), cond.to_numpy()):
+        if pd.isna(c):
+            continue
+        ci = int(c)
+        if ci not in (1, 2, 3):
+            continue
+        out.append((float(onset), float(event_tlen), f"stimcond_{ci}"))
+    return out
+
+
+def parse_hbn_symbolsearch(
+    src_path: Path,
+    event_tlen: float = 2.0,
+) -> List[Tuple[float, float, str]]:
+    """
+    symbolSearch trial-correctness classification annotations.
+
+    For each `trialResponse` row, compares `user_answer` and
+    `correct_answer` (both 0/1 floats). Emits ``correct`` when they are
+    equal, ``incorrect`` otherwise. Rows where either value is n/a are
+    skipped.
+
+    The config pairs this with ``event_tmin: -1.0`` so each 2-s window is
+    centred on the response onset.
+
+    Returns
+    -------
+    List of (onset, duration, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    if not {"user_answer", "correct_answer"}.issubset(events_df.columns):
+        logging.warning(f"symbolSearch: missing answer columns in {events_tsv}")
+        return []
+    resp = events_df[events_df["value"] == "trialResponse"]
+    ua = pd.to_numeric(resp["user_answer"], errors="coerce")
+    ca = pd.to_numeric(resp["correct_answer"], errors="coerce")
+    out = []
+    for onset, u, c in zip(resp["onset"].to_numpy(), ua.to_numpy(), ca.to_numpy()):
+        if pd.isna(u) or pd.isna(c):
+            continue
+        label = "correct" if u == c else "incorrect"
+        out.append((float(onset), float(event_tlen), label))
+    return out
