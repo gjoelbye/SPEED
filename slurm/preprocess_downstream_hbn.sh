@@ -29,11 +29,11 @@
 #SBATCH --output=/home/agjma/SPEED/logs/slurm-%A-%a-%x.out
 #SBATCH --array=0-5
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=60G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=80G
 #SBATCH --mail-user=agjma@dtu.dk
 #SBATCH --export=ALL
-#SBATCH --time=48:00:00
+#SBATCH --time=167:00:00
 
 CONFIGS=(
     configs/downstream/hbn_ccd_rt.yaml

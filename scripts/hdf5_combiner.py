@@ -221,27 +221,49 @@ class HDF5Combiner:
 
 
 class HDF5CombinerDownstream(HDF5Combiner):
-    """HDF5Combiner with additional labels and descriptions fields."""
-    
+    """HDF5Combiner with labels + descriptions.
+
+    Labels may be:
+      - int32 (N,) for classification,
+      - float32 (N,) for scalar regression (e.g. reaction time),
+      - float32 (N, K) for multi-target regression (e.g. CBCL 4-vectors).
+
+    Dtype and trailing shape are inferred from the first source file and
+    preserved end-to-end; labels from each source file are appended as arrays
+    and concatenated on save, so no per-element cast ever happens.
+    """
+
     def _get_extra_metadata(self) -> None:
         with h5py.File(self.src_paths[0], 'r') as f:
             self._descriptions = f.attrs['descriptions']
-    
+            ds = f['labels']
+            self._labels_dtype = ds.dtype
+            self._labels_trailing_shape = ds.shape[1:]  # () for 1-D, (K,) for multi-target
+
     def _init_extra_lists(self) -> None:
-        self._labels: List[int] = []
-    
+        # One array per source file — concat preserves dtype + shape.
+        self._label_arrays: List[np.ndarray] = []
+
     def _extend_extra_lists(self, src_file: h5py.File) -> None:
-        labels = src_file['labels'][:]
-        self._labels.extend(labels.tolist() if isinstance(labels, np.ndarray) else labels)
-    
+        self._label_arrays.append(src_file['labels'][:])
+
     def _save_extra_datasets(self) -> None:
-        labels = np.array(self._labels, dtype=np.int32) if self._labels else np.empty(0, dtype=np.int32)
-        
-        assert len(labels) == self._data_idx, \
-            f"Labels length mismatch: {len(labels)} vs {self._data_idx}"
-        
-        self._file.create_dataset("labels", data=labels, dtype=np.int32, fletcher32=True)
+        if self._label_arrays:
+            labels = np.concatenate(self._label_arrays, axis=0)
+        else:
+            labels = np.empty(
+                (0,) + self._labels_trailing_shape, dtype=self._labels_dtype
+            )
+
+        assert labels.shape[0] == self._data_idx, (
+            f"Labels length mismatch: {labels.shape[0]} vs {self._data_idx}"
+        )
+
+        self._file.create_dataset(
+            "labels", data=labels, dtype=self._labels_dtype, fletcher32=True
+        )
         self._file.attrs['descriptions'] = self._descriptions
+        self._label_arrays = []  # free memory before the next output file
 
 
 def main():

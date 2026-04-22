@@ -8,6 +8,7 @@ from HDF5 files created by the downstream preprocessing pipeline.
 import os
 import re
 from collections import defaultdict
+from glob import glob as _glob
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple, Dict, Any, Union
 
@@ -82,12 +83,18 @@ class DownstreamDataset(Dataset):
         self.label_filter = label_filter
         self.return_metadata = return_metadata
 
-        # Discover HDF5 files
+        # Discover HDF5 files. Recursive so sharded layouts
+        # (out_path/shard_XX/batch_*.hdf5) work as transparently as the flat
+        # (out_path/batch_*.hdf5) layout. Both are produced by SPEED's
+        # downstream SLURM scripts.
         if self.path.is_dir():
-            self.paths = sorted([
-                self.path / f for f in os.listdir(self.path)
-                if f.endswith('.hdf5') or f.endswith('.h5')
-            ])
+            patterns = (
+                str(self.path / "**" / "*.hdf5"),
+                str(self.path / "**" / "*.h5"),
+            )
+            self.paths = sorted({
+                Path(p) for pat in patterns for p in _glob(pat, recursive=True)
+            })
         elif self.path.is_file():
             self.paths = [self.path]
         else:

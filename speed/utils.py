@@ -286,17 +286,23 @@ def save_hdf5(
 
 
 def save_hdf5_with_labels(
-    raws: List[mne.io.Raw],
-    labels,
-    label_descriptions: List[str],
-    src_paths: List[Path],
-    times: List[Tuple[float, float]],
-    indices: List[int],
-    dest_path: Path,
-    quality_metrics: Optional[List[Dict]] = None
+    raws: Optional[List[mne.io.Raw]] = None,
+    labels=None,
+    label_descriptions: Optional[List[str]] = None,
+    src_paths: Optional[List[Path]] = None,
+    times: Optional[List[Tuple[float, float]]] = None,
+    indices: Optional[List[int]] = None,
+    dest_path: Optional[Path] = None,
+    quality_metrics: Optional[List[Dict]] = None,
+    data_arrays: Optional[List[np.ndarray]] = None,
 ) -> None:
     """
     Save preprocessed windows with labels to HDF5 for downstream tasks.
+
+    Accepts either ``raws`` (list of MNE Raw objects) or ``data_arrays`` (list of
+    already-materialised (C, T) float32 arrays). The second form lets worker
+    processes return plain ndarrays across process boundaries instead of pickling
+    full MNE Raw objects.
 
     HDF5 Structure:
         data: (N, C, T) - EEG windows
@@ -306,29 +312,12 @@ def save_hdf5_with_labels(
         time_slices: (N, 2) - (start, end) times
         attrs['descriptions']: label descriptions
         attrs['quality_metrics']: optional quality data
-
-    Parameters
-    ----------
-    raws : List[mne.io.Raw]
-        Preprocessed raw objects
-    labels : list of int, float, or list/array
-        Class labels (int) or regression targets (float). For multi-target
-        regression, each element can be a list/array of floats.
-    label_descriptions : List[str]
-        String descriptions for each label class
-    src_paths : List[Path]
-        Source file paths
-    times : List[Tuple[float, float]]
-        (start_time, end_time) for each window
-    indices : List[int]
-        Index of source file for each window
-    dest_path : Path
-        Output HDF5 file path
-    quality_metrics : List[Dict], optional
-        Quality metrics for each window
     """
-    # Convert to numpy arrays
-    data = np.array([r._data for r in raws], dtype='float32')
+    if data_arrays is None:
+        if raws is None:
+            raise ValueError("Provide either raws or data_arrays")
+        data_arrays = [r._data for r in raws]
+    data = np.asarray(data_arrays, dtype=np.float32)
     labels_arr = np.array(labels)
     # Auto-detect dtype: float for regression, int for classification
     if labels_arr.dtype.kind == 'f':

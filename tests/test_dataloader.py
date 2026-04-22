@@ -144,3 +144,35 @@ class TestDownstreamDataset:
         dataset = DownstreamDataset(tmp_hdf5)
         counts = dataset.get_label_counts()
         assert sum(counts.values()) == len(dataset)
+
+    def test_recursive_shard_discovery(self, tmp_path):
+        """DownstreamDataset should find HDF5s in nested subdirs (sharded runs)."""
+        import h5py
+        # Build a two-shard layout: parent/shard_00/batch.hdf5 + parent/shard_01/batch.hdf5
+        # plus a flat file at the parent level (mimics coexistence with the old
+        # non-sharded output).
+        root = tmp_path
+        for sub in ("shard_00", "shard_01"):
+            d = root / sub
+            d.mkdir()
+            with h5py.File(d / "batch_00000.hdf5", "w") as f:
+                f.create_dataset("data", data=np.zeros((3, 19, 128), dtype="float32"))
+                f.create_dataset("labels", data=np.array([0, 1, 0], dtype="int32"))
+                f.create_dataset("file_idxs", data=np.zeros(3, dtype="int32"))
+                f.create_dataset(
+                    "files", data=np.array([f"{sub}_rec"], dtype=h5py.string_dtype())
+                )
+                f.create_dataset("time_slices", data=np.zeros((3, 2), dtype="float32"))
+                f.attrs["descriptions"] = ["a", "b"]
+        with h5py.File(root / "batch_00000.hdf5", "w") as f:
+            f.create_dataset("data", data=np.zeros((2, 19, 128), dtype="float32"))
+            f.create_dataset("labels", data=np.array([1, 1], dtype="int32"))
+            f.create_dataset("file_idxs", data=np.zeros(2, dtype="int32"))
+            f.create_dataset("files", data=np.array(["flat_rec"], dtype=h5py.string_dtype()))
+            f.create_dataset("time_slices", data=np.zeros((2, 2), dtype="float32"))
+            f.attrs["descriptions"] = ["a", "b"]
+
+        ds = DownstreamDataset(root)
+        # 3 from shard_00 + 3 from shard_01 + 2 from flat root = 8 total windows.
+        assert len(ds) == 8
+        assert len(ds.paths) == 3  # one HDF5 from each of the 3 locations
