@@ -12,8 +12,8 @@
 
 #BSUB -q hpc
 #BSUB -J "hbn_ccd_correct[1-5]"
-#BSUB -oo $HOME/SPEED/logs/spectrum/hbn_ccd_correct_%J.%I.out
-#BSUB -eo $HOME/SPEED/logs/spectrum/hbn_ccd_correct_%J.%I.err
+#BSUB -oo /zhome/33/6/147533/SPEED/logs/spectrum/hbn_ccd_correct_%J.%I.out
+#BSUB -eo /zhome/33/6/147533/SPEED/logs/spectrum/hbn_ccd_correct_%J.%I.err
 #BSUB -W 24:00
 #BSUB -n 16
 #BSUB -R "span[hosts=1]"

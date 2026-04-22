@@ -46,7 +46,7 @@ SHARD_LIST="${SHARD_DIR}/input.txt"
 SHARD_YAML="${SHARD_DIR}/config.yaml"
 SHARD_LOG="${SHARD_DIR}/log.txt"
 
-mkdir -p "${SHARD_DIR}" $HOME/SPEED/logs/spectrum
+mkdir -p "${SHARD_DIR}" /zhome/33/6/147533/SPEED/logs/spectrum
 
 # Interleaved split: line k goes to shard (k % N_SHARDS). Matches the SLURM
 # inner script; verified partitioning + zero overlap on cyclopes.
