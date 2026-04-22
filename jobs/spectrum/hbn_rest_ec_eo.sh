@@ -12,8 +12,8 @@
 
 #BSUB -q hpc
 #BSUB -J "hbn_rest_ec_eo[1-5]"
-#BSUB -oo /work3/agjma/SPEED/logs/spectrum/hbn_rest_ec_eo_%J.%I.out
-#BSUB -eo /work3/agjma/SPEED/logs/spectrum/hbn_rest_ec_eo_%J.%I.err
+#BSUB -oo $HOME/SPEED/logs/spectrum/hbn_rest_ec_eo_%J.%I.out
+#BSUB -eo $HOME/SPEED/logs/spectrum/hbn_rest_ec_eo_%J.%I.err
 #BSUB -W 24:00
 #BSUB -n 16
 #BSUB -R "span[hosts=1]"

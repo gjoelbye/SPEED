@@ -12,8 +12,8 @@
 
 #BSUB -q hpc
 #BSUB -J "hbn_ccd_rt_4s[1-5]"
-#BSUB -oo /work3/agjma/SPEED/logs/spectrum/hbn_ccd_rt_4s_%J.%I.out
-#BSUB -eo /work3/agjma/SPEED/logs/spectrum/hbn_ccd_rt_4s_%J.%I.err
+#BSUB -oo $HOME/SPEED/logs/spectrum/hbn_ccd_rt_4s_%J.%I.out
+#BSUB -eo $HOME/SPEED/logs/spectrum/hbn_ccd_rt_4s_%J.%I.err
 #BSUB -W 24:00
 #BSUB -n 16
 #BSUB -R "span[hosts=1]"
