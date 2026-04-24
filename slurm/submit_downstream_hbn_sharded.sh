@@ -33,13 +33,18 @@ N_SHARDS=${1:-6}
 shift || true
 
 if [ "$#" -eq 0 ]; then
+    # Unified CCD config replaces the old ccd_rt + ccd_correct + ccd_rt_4s
+    # trio (one preprocessing run, many per-window targets). Seq-learning
+    # and movies are new in the multi-target buildout.
     CONFIGS=(
-        configs/downstream/hbn_ccd_rt.yaml
-        configs/downstream/hbn_ccd_correct.yaml
+        configs/downstream/hbn_ccd.yaml
         configs/downstream/hbn_cbcl.yaml
         configs/downstream/hbn_rest_ec_eo.yaml
         configs/downstream/hbn_surroundsupp.yaml
         configs/downstream/hbn_symbolsearch.yaml
+        configs/downstream/hbn_seqlearning6.yaml
+        configs/downstream/hbn_seqlearning8.yaml
+        configs/downstream/hbn_movies.yaml
     )
 else
     CONFIGS=("$@")

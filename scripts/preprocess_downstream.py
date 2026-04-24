@@ -28,7 +28,7 @@ import multiprocessing as mp
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import h5py
 import mne
@@ -46,7 +46,89 @@ from speed.cache import (
 )
 from speed.pipeline import PretrainPipeline
 from speed.provenance import save_provenance
-from speed.utils import save_hdf5_with_labels
+from speed.utils import save_hdf5_with_labels, add_targets_to_existing_hdf5
+from speed.downstream_targets import (
+    GENERATOR_VERSION,
+    compute_all_targets,
+    TargetMismatchError,
+)
+
+
+# Map `annotation_format` (full value, e.g. "hbn_ccd") to the short task tag
+# the targets dispatcher understands (e.g. "ccd"). Non-HBN formats return None
+# → pipeline writes no ``targets/`` group (existing behaviour).
+_ANNOTATION_FORMAT_TO_TASK_TAG = {
+    "hbn_ccd": "ccd",
+    "hbn_ccd_rt": "ccd_rt",
+    "hbn_ccd_correct": "ccd_correct",
+    "hbn_symbolsearch": "symbolsearch",
+    "hbn_surroundsupp": "surroundsupp",
+    "hbn_rest_ec_eo": "rest_ec_eo",
+    "hbn_seqlearning6": "seqlearning6",
+    "hbn_seqlearning8": "seqlearning8",
+    "hbn_movies": "movies",
+    "hbn_cbcl": "cbcl",
+}
+
+
+def _write_targets(
+    hdf5_path: Path,
+    unique_src_paths: List[Path],
+    indices: List[int],
+    times: List[Tuple[float, float]],
+    task_tag: str,
+    event_tmin: float,
+    event_tlen: float,
+    movie_window_stride: Optional[float],
+) -> None:
+    """Compute per-task targets for every window in a just-saved batch and
+    append them as ``targets/<key>`` datasets.
+
+    Windows are grouped by source file so each events.tsv / participants.tsv
+    is read once per batch, matching the migration script's flow.
+    """
+    indices_arr = np.asarray(indices)
+    times_arr = np.asarray(times, dtype=np.float32)
+    # time_slices[:, 0] is the actual window start; event_onset == window_start - event_tmin
+    window_event_onsets = times_arr[:, 0] - float(event_tmin)
+    recording_onset_sec = times_arr[:, 0]
+
+    merged: Dict[str, np.ndarray] = {}
+
+    # Discover per-source row groups.
+    for src_idx, src_path in enumerate(unique_src_paths):
+        mask = indices_arr == src_idx
+        if not mask.any():
+            continue
+        rows = np.where(mask)[0]
+        src_events = window_event_onsets[rows]
+        src_recording_onset = recording_onset_sec[rows]
+        per_src = compute_all_targets(
+            src_path=Path(src_path),
+            window_onsets=src_events,
+            recording_onset_sec=src_recording_onset,
+            task=task_tag,
+        )
+        for key, arr in per_src.items():
+            if key not in merged:
+                # Initialise a full-length output array with matching dtype.
+                if arr.dtype.kind in ('U', 'O', 'S'):
+                    merged[key] = np.full(len(indices), "", dtype=object)
+                elif arr.dtype.kind in ('i', 'u', 'b'):
+                    merged[key] = np.full(len(indices), -1, dtype=arr.dtype)
+                else:
+                    merged[key] = np.full(len(indices), np.nan, dtype=np.float32)
+            merged[key][rows] = arr
+
+    attrs = {
+        "event_tmin_used": float(event_tmin),
+        "event_tlen_used": float(event_tlen),
+        "generator_version": GENERATOR_VERSION,
+    }
+    if movie_window_stride is not None:
+        attrs["movie_window_stride"] = float(movie_window_stride)
+
+    add_targets_to_existing_hdf5(hdf5_path, merged, attrs=attrs, force=True)
 
 
 def configure_logging(filename: str, level: str = "INFO"):
@@ -283,6 +365,31 @@ def preprocess_downstream(
             indices=indices,
             dest_path=hdf5_path,
         )
+
+        # Compute + append the per-window ``targets/`` group. Uses the same
+        # speed/downstream_targets.py code path the migration script uses, so
+        # forward preprocessing and post-hoc migration converge byte-identically.
+        task_tag = _ANNOTATION_FORMAT_TO_TASK_TAG.get(pipeline.annotation_format)
+        if task_tag is not None:
+            try:
+                _write_targets(
+                    hdf5_path=hdf5_path,
+                    unique_src_paths=unique_src_paths,
+                    indices=indices,
+                    times=times,
+                    task_tag=task_tag,
+                    event_tmin=pipeline.event_tmin,
+                    event_tlen=pipeline.event_tlen,
+                    movie_window_stride=getattr(pipeline, "movie_window_stride", None),
+                )
+            except TargetMismatchError as e:
+                # Fatal: schema drift between events.tsv and preprocessed onsets.
+                logging.error(f"Batch {batch_id}: target mismatch: {e}")
+                raise
+            except Exception as e:
+                logging.warning(
+                    f"Batch {batch_id}: targets write failed (continuing without): {e}"
+                )
 
         logging.info(f"Batch {batch_id}: Saved {len(data_arrays)} windows to {hdf5_path}")
 

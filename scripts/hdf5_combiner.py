@@ -221,7 +221,7 @@ class HDF5Combiner:
 
 
 class HDF5CombinerDownstream(HDF5Combiner):
-    """HDF5Combiner with labels + descriptions.
+    """HDF5Combiner with labels + descriptions + optional ``targets/`` group.
 
     Labels may be:
       - int32 (N,) for classification,
@@ -231,6 +231,13 @@ class HDF5CombinerDownstream(HDF5Combiner):
     Dtype and trailing shape are inferred from the first source file and
     preserved end-to-end; labels from each source file are appended as arrays
     and concatenated on save, so no per-element cast ever happens.
+
+    If the first source file contains a ``targets/`` group (written by the
+    multi-target pipeline or the migration script), every per-window target
+    dataset inside it is propagated through the merge, along with any
+    group-level attributes. Sources missing a key that the first file has get
+    dtype-appropriate sentinel fill (``-1`` for int, NaN for float, ``""``
+    for string) so partially-migrated source trees still merge cleanly.
     """
 
     def _get_extra_metadata(self) -> None:
@@ -240,12 +247,36 @@ class HDF5CombinerDownstream(HDF5Combiner):
             self._labels_dtype = ds.dtype
             self._labels_trailing_shape = ds.shape[1:]  # () for 1-D, (K,) for multi-target
 
+            # Optional ``targets/`` group — infer schema from first source.
+            self._targets_schema: Dict[str, tuple] = {}  # key -> (dtype, trailing_shape)
+            self._targets_attrs: Dict[str, Any] = {}
+            if 'targets' in f:
+                grp = f['targets']
+                for k, v in grp.items():
+                    self._targets_schema[k] = (v.dtype, tuple(v.shape[1:]))
+                for k, v in grp.attrs.items():
+                    self._targets_attrs[k] = v
+
     def _init_extra_lists(self) -> None:
         # One array per source file — concat preserves dtype + shape.
         self._label_arrays: List[np.ndarray] = []
+        # One list per target key.
+        self._target_arrays: Dict[str, List[np.ndarray]] = {
+            k: [] for k in self._targets_schema
+        }
 
     def _extend_extra_lists(self, src_file: h5py.File) -> None:
         self._label_arrays.append(src_file['labels'][:])
+        if not self._targets_schema:
+            return
+        n = src_file['data'].shape[0]
+        src_grp = src_file.get('targets')
+        for key, (dtype, trailing) in self._targets_schema.items():
+            if src_grp is not None and key in src_grp:
+                self._target_arrays[key].append(src_grp[key][:])
+            else:
+                # Partial migration: fill with sentinel of the expected shape.
+                self._target_arrays[key].append(_sentinel_fill((n,) + trailing, dtype))
 
     def _save_extra_datasets(self) -> None:
         if self._label_arrays:
@@ -263,7 +294,53 @@ class HDF5CombinerDownstream(HDF5Combiner):
             "labels", data=labels, dtype=self._labels_dtype, fletcher32=True
         )
         self._file.attrs['descriptions'] = self._descriptions
+
+        # Write the ``targets/`` group if we have one.
+        if self._targets_schema:
+            grp = self._file.create_group('targets')
+            for key, arrays in self._target_arrays.items():
+                if arrays:
+                    concat = np.concatenate(arrays, axis=0)
+                else:
+                    dtype, trailing = self._targets_schema[key]
+                    concat = np.empty((0,) + trailing, dtype=dtype)
+                assert concat.shape[0] == self._data_idx, (
+                    f"Target {key!r} length {concat.shape[0]} != {self._data_idx}"
+                )
+                if concat.dtype.kind in ('O', 'U', 'S'):
+                    # Variable-length strings can't be fletcher32-compressed.
+                    str_arr = np.array(
+                        [s.decode('utf-8') if isinstance(s, bytes)
+                         else ("" if s is None else str(s))
+                         for s in concat],
+                        dtype=h5py.string_dtype(),
+                    )
+                    grp.create_dataset(key, data=str_arr, dtype=h5py.string_dtype())
+                else:
+                    grp.create_dataset(
+                        key, data=concat, dtype=concat.dtype, fletcher32=True,
+                    )
+            for k, v in self._targets_attrs.items():
+                grp.attrs[k] = v
+
         self._label_arrays = []  # free memory before the next output file
+        self._target_arrays = {k: [] for k in self._targets_schema}
+
+
+def _sentinel_fill(shape: tuple, dtype: np.dtype) -> np.ndarray:
+    """Return a sentinel-filled array for a target missing from some source."""
+    kind = dtype.kind
+    if kind == 'f':
+        out = np.empty(shape, dtype=dtype)
+        out[...] = np.nan
+        return out
+    if kind in ('i', 'u'):
+        return np.full(shape, -1, dtype=dtype)
+    if kind in ('O', 'U', 'S'):
+        return np.full(shape, "", dtype=dtype)
+    if kind == 'b':
+        return np.zeros(shape, dtype=dtype)
+    raise TypeError(f"Cannot build sentinel for dtype {dtype!r}")
 
 
 def main():

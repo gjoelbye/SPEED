@@ -15,8 +15,9 @@ from speed.annotations import (
     parse_eegmat_annotations, parse_hmc_sleepscoring, parse_isruc_annotations,
     parse_mumtaz2016_annotations, parse_tuev_annotations, parse_tuab_annotations,
     parse_bcic_iv_2a_events, parse_shu_mi_events, parse_siena_seizures,
-    parse_hbn_ccd_rt, parse_hbn_ccd_correct, parse_hbn_cbcl,
+    parse_hbn_ccd, parse_hbn_ccd_rt, parse_hbn_ccd_correct, parse_hbn_cbcl,
     parse_hbn_rest_ec_eo, parse_hbn_surroundsupp, parse_hbn_symbolsearch,
+    parse_hbn_seqlearning, parse_hbn_movie,
 )
 
 
@@ -347,6 +348,7 @@ class PretrainPipeline(BasePipeline):
         label_mapping: Optional[Dict[str, Union[int, float]]] = None,
         annotation_format: str = "auto",
         task_type: str = "classification",
+        movie_window_stride: float = 15.0,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -358,6 +360,9 @@ class PretrainPipeline(BasePipeline):
         self.label_mapping = label_mapping or {}
         self.annotation_format = annotation_format
         self.task_type = task_type
+        # Only consulted by the hbn_movies branch — fixed strided windows
+        # over the video's run. Overlap = event_tlen - movie_window_stride.
+        self.movie_window_stride = movie_window_stride
     
     def __call__(self, src_paths: List[str]) -> Union[
         Tuple[List[mne.io.Raw], List[Tuple[float, float]], List[int]],
@@ -755,7 +760,9 @@ class PretrainPipeline(BasePipeline):
             # HBN: parsers read events.tsv (and participants.tsv for CBCL).
             # Replace existing EEGLAB annotations so split_raw_annotations
             # does not pick up `boundary`, `break cnt`, etc. as windows.
-            if self.annotation_format == 'hbn_ccd_rt':
+            if self.annotation_format == 'hbn_ccd':
+                events = parse_hbn_ccd(src_path, self.event_tlen)
+            elif self.annotation_format == 'hbn_ccd_rt':
                 events = parse_hbn_ccd_rt(src_path, self.event_tlen)
             elif self.annotation_format == 'hbn_ccd_correct':
                 events = parse_hbn_ccd_correct(src_path, self.event_tlen)
@@ -767,6 +774,15 @@ class PretrainPipeline(BasePipeline):
                 events = parse_hbn_surroundsupp(src_path, self.event_tlen)
             elif self.annotation_format == 'hbn_symbolsearch':
                 events = parse_hbn_symbolsearch(src_path, self.event_tlen)
+            elif self.annotation_format == 'hbn_seqlearning6':
+                events = parse_hbn_seqlearning(src_path, self.event_tlen, n_targets=6)
+            elif self.annotation_format == 'hbn_seqlearning8':
+                events = parse_hbn_seqlearning(src_path, self.event_tlen, n_targets=8)
+            elif self.annotation_format == 'hbn_movies':
+                events = parse_hbn_movie(
+                    src_path, recording_duration=raw.times[-1],
+                    event_tlen=self.event_tlen, stride=self.movie_window_stride,
+                )
             else:
                 raise ValueError(f"Unknown HBN annotation_format: {self.annotation_format}")
 

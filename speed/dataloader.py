@@ -76,12 +76,24 @@ class DownstreamDataset(Dataset):
         path: Union[str, Path],
         transform: Optional[Callable] = None,
         label_filter: Optional[List[int]] = None,
-        return_metadata: bool = False
+        return_metadata: bool = False,
+        target_key: str = "labels",
     ):
+        """Parameters (in addition to the class docstring):
+
+        target_key : str, default "labels"
+            Which HDF5 dataset to return as the ``label`` element of each sample.
+            The default reads the top-level ``labels`` dataset (backward compat).
+            Pass e.g. ``"targets/ccd_correct"`` to read a nested per-window
+            target written by the multi-target pipeline / migration path. If
+            the key is missing from a file, that file's labels fall back to
+            sentinel −1 (int) / NaN (float).
+        """
         self.path = Path(path)
         self.transform = transform
         self.label_filter = label_filter
         self.return_metadata = return_metadata
+        self.target_key = target_key
 
         # Discover HDF5 files. Recursive so sharded layouts
         # (out_path/shard_XX/batch_*.hdf5) work as transparently as the flat
@@ -118,9 +130,10 @@ class DownstreamDataset(Dataset):
                 if self.label_descriptions is None and 'descriptions' in f.attrs:
                     self.label_descriptions = list(f.attrs['descriptions'])
 
-                # Load labels if filtering
-                if self.label_filter is not None and 'labels' in f:
-                    labels = f['labels'][:]
+                # Load labels if filtering (filter always looks at the selected
+                # target_key, not just top-level 'labels').
+                if self.label_filter is not None and self.target_key in f:
+                    labels = f[self.target_key][:]
                     valid_indices = [i for i in range(n_samples) if labels[i] in self.label_filter]
                 else:
                     valid_indices = list(range(n_samples))
@@ -157,7 +170,15 @@ class DownstreamDataset(Dataset):
         # Load data and label from HDF5
         with h5py.File(hdf5_path, 'r') as f:
             data = f['data'][local_idx]
-            label = f['labels'][local_idx] if 'labels' in f else -1
+            # target_key drives which dataset is returned as the label. When
+            # missing, fall back to top-level 'labels' (older HDF5s without
+            # targets/ group) or −1.
+            if self.target_key in f:
+                label = f[self.target_key][local_idx]
+            elif 'labels' in f:
+                label = f['labels'][local_idx]
+            else:
+                label = -1
 
             if self.return_metadata:
                 file_idx_in_file = f['file_idxs'][local_idx]
@@ -208,11 +229,15 @@ class DownstreamDataset(Dataset):
 
         for file_idx, local_indices in file_groups.items():
             with h5py.File(self.paths[file_idx], 'r') as f:
-                if 'labels' in f:
-                    all_labels = f['labels'][:]
-                    for local_idx in local_indices:
-                        label = int(all_labels[local_idx])
-                        counts[label] = counts.get(label, 0) + 1
+                src = self.target_key if self.target_key in f else (
+                    'labels' if 'labels' in f else None
+                )
+                if src is None:
+                    continue
+                all_labels = f[src][:]
+                for local_idx in local_indices:
+                    label = int(all_labels[local_idx])
+                    counts[label] = counts.get(label, 0) + 1
         return counts
 
     def get_label_name(self, label: int) -> str:
@@ -256,43 +281,90 @@ class DownstreamDataset(Dataset):
         if subject_extractor is None:
             subject_extractor = _default_subject_extractor
 
-        # Build mapping: for each HDF5 file, read 'files' and 'file_idxs'
+        # Build mapping. Prefer a stored per-window ``targets/subject_id`` when
+        # present (written by the multi-target pipeline / migration) —
+        # guaranteed correct even for pooled-task buckets (e.g. movies) where
+        # stem-regex extraction can be brittle. Fall back to extractor-on-stem.
         groups = defaultdict(list)
 
-        # Track cumulative offset for global indices
-        global_offset = 0
         for file_idx, hdf5_path in enumerate(self.paths):
             with h5py.File(hdf5_path, 'r') as f:
-                # Get source filenames
-                if 'files' not in f:
-                    # No source file metadata, treat entire HDF5 as one subject
-                    n_local = sum(1 for fi, _ in self.index if fi == file_idx)
-                    subject_id = hdf5_path.stem
-                    for gi, (fi, _) in enumerate(self.index):
-                        if fi == file_idx:
-                            groups[subject_id].append(gi)
-                    continue
+                stored_subject = None
+                if 'targets/subject_id' in f:
+                    stored_subject = [
+                        s.decode('utf-8') if isinstance(s, bytes) else s
+                        for s in f['targets/subject_id'][:]
+                    ]
+                    source_files = None
+                    file_idxs = None
+                elif 'files' in f:
+                    source_files = [
+                        s.decode('utf-8') if isinstance(s, bytes) else s
+                        for s in f['files'][:]
+                    ]
+                    file_idxs = f['file_idxs'][:] if 'file_idxs' in f else None
+                else:
+                    source_files = None
+                    file_idxs = None
 
-                source_files = [
-                    s.decode('utf-8') if isinstance(s, bytes) else s
-                    for s in f['files'][:]
-                ]
-
-                # Get per-sample file_idxs
-                file_idxs = f['file_idxs'][:] if 'file_idxs' in f else None
-
-            # Map global indices to subjects
+            # Map global indices to subjects for this file.
             for gi, (fi, local_idx) in enumerate(self.index):
                 if fi != file_idx:
                     continue
-                if file_idxs is not None:
-                    src_name = source_files[file_idxs[local_idx]]
+                if stored_subject is not None:
+                    subject_id = stored_subject[local_idx] or hdf5_path.stem
+                elif source_files is not None:
+                    if file_idxs is not None:
+                        src_name = source_files[file_idxs[local_idx]]
+                    else:
+                        src_name = hdf5_path.stem
+                    subject_id = subject_extractor(src_name)
                 else:
-                    src_name = hdf5_path.stem
-                subject_id = subject_extractor(src_name)
+                    subject_id = hdf5_path.stem
                 groups[subject_id].append(gi)
 
         return dict(groups)
+
+
+def list_targets(path: Union[str, Path]) -> Tuple[Dict[str, Tuple[str, tuple]], Dict[str, Any]]:
+    """Inspect the ``targets/`` group of an HDF5 bucket.
+
+    Parameters
+    ----------
+    path : str or Path
+        Directory containing HDF5 files, or a single HDF5 file. The first
+        file found is inspected — ``HDF5CombinerDownstream`` guarantees all
+        files in a bucket share the same target schema.
+
+    Returns
+    -------
+    targets : dict[str, (str, tuple)]
+        Mapping from target key (e.g. ``"targets/ccd_correct"``) to
+        ``(dtype_str, shape)``. Empty dict if no ``targets/`` group present.
+    attrs : dict
+        Attributes attached to the ``targets/`` group (e.g.
+        ``event_tmin_used``, ``generator_version``). Empty dict if no group.
+    """
+    path = Path(path)
+    if path.is_dir():
+        candidates = sorted(path.glob("**/*.hdf5")) + sorted(path.glob("**/*.h5"))
+        if not candidates:
+            raise FileNotFoundError(f"No HDF5 files in {path}")
+        h5_path = candidates[0]
+    else:
+        h5_path = path
+
+    out: Dict[str, Tuple[str, tuple]] = {}
+    attrs: Dict[str, Any] = {}
+    with h5py.File(h5_path, 'r') as f:
+        if 'targets' not in f:
+            return out, attrs
+        grp = f['targets']
+        for k, v in grp.items():
+            out[f"targets/{k}"] = (str(v.dtype), tuple(v.shape))
+        for k, v in grp.attrs.items():
+            attrs[k] = v.item() if hasattr(v, 'item') else v
+    return out, attrs
 
 
 def _default_subject_extractor(filename: str) -> str:

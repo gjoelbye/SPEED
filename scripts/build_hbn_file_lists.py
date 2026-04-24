@@ -26,6 +26,10 @@ Writes:
     <out_dir>/rest.txt           — all RestingState files
     <out_dir>/surroundsupp.txt   — all surroundSupp_run-* files
     <out_dir>/symbolsearch.txt   — all symbolSearch files
+    <out_dir>/seqlearning6.txt   — all seqLearning6target files
+    <out_dir>/seqlearning8.txt   — all seqLearning8target files
+    <out_dir>/movies.txt         — pooled DespicableMe + FunwithFractals +
+                                   ThePresent + DiaryOfAWimpyKid files
 """
 
 import argparse
@@ -67,6 +71,28 @@ TASK_SPECS: Dict[str, Dict] = {
     "symbolsearch": {
         "availability_cols": ["symbolSearch"],
         "file_patterns": ["_task-symbolSearch_eeg.set"],
+    },
+    "seqlearning6": {
+        "availability_cols": ["seqLearning6target"],
+        "file_patterns": ["_task-seqLearning6target_eeg.set"],
+    },
+    "seqlearning8": {
+        "availability_cols": ["seqLearning8target"],
+        "file_patterns": ["_task-seqLearning8target_eeg.set"],
+    },
+    # Pooled 4-movie bucket — each movie has its own availability column and
+    # filename; downstream hbn_movies.yaml treats the combined list as one
+    # dataset with movie_name as the primary label.
+    "movies": {
+        "availability_cols": [
+            "DespicableMe", "FunwithFractals", "ThePresent", "DiaryOfAWimpyKid",
+        ],
+        "file_patterns": [
+            "_task-DespicableMe_eeg.set",
+            "_task-FunwithFractals_eeg.set",
+            "_task-ThePresent_eeg.set",
+            "_task-DiaryOfAWimpyKid_eeg.set",
+        ],
     },
 }
 

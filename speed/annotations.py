@@ -996,6 +996,8 @@ convert_chbmit_bipolar_to_average = convert_chbmit_bipolar_to_monopolar
 # 3 releases: smiley_face=correct / sad_face=incorrect / non_target=false alarm).
 _HBN_CCD_FEEDBACK_CORRECT = "smiley_face"
 _HBN_CCD_FEEDBACK_INCORRECT = "sad_face"
+_HBN_CCD_FEEDBACK_NON_TARGET = "non_target"
+_HBN_MOVIE_TASKS = ("DespicableMe", "FunwithFractals", "ThePresent", "DiaryOfAWimpyKid")
 # RT filter: observed p1 = 0.45 s, the <0.25 s tail is dominated by
 # anticipatory / accidental presses; drop them from regression targets.
 _HBN_CCD_MIN_RT = 0.25
@@ -1137,25 +1139,59 @@ def _hbn_ccd_pair_trials(events_df: pd.DataFrame) -> List[Tuple[float, float, fl
     return out
 
 
-def parse_hbn_ccd_rt(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[float, float, str]]:
+def parse_hbn_ccd(src_path: Path, event_tlen: float = 3.0) -> List[Tuple[float, float, str]]:
     """
-    Extract CCD reaction-time regression annotations (eeg2025 Challenge 1 style).
+    Unified CCD parser — emits one annotation per paired trial at stim_onset
+    with description ``correct`` / ``incorrect`` / ``non_target`` so *every*
+    trial with feedback is a training window regardless of which target
+    (correctness, RT, target side, …) the consumer wants.
 
-    Each valid trial yields one annotation at the stimulus onset with
-    description ``f"rt_{rt:.6f}"`` where
-    ``rt = response_onset - stimulus_onset``. SPEED's regression decoder
-    parses the description by splitting on '_' and converting suffix tokens
-    to floats, so the yaml config should set ``task_type: regression`` and
-    ``event_tmin: 0.5`` (start the window 0.5 s after stimulus onset).
+    The corresponding yaml should declare
+    ``event_labels: ['correct','incorrect','non_target']`` and
+    ``label_mapping: {incorrect: 0, correct: 1, non_target: 2}``. Per-window
+    target variants (``ccd_correct``, ``ccd_rt``, ``ccd_target_side``,
+    ``ccd_button_side``, ``ccd_non_target``) are computed by
+    :func:`speed.downstream_targets.hbn_ccd_targets` and stored under the
+    HDF5 ``targets/`` group.
 
-    Trials missing the stimulus or the response are dropped (~17 % of
-    trials empirically). Trials with RT < 0.25 s are dropped as
-    anticipatory/accidental presses (below the empirical p1 of the RT
-    distribution).
+    Replaces both :func:`parse_hbn_ccd_rt` and :func:`parse_hbn_ccd_correct`.
+    Those two are kept as thin shims so archived configs still run.
+
+    Trials without feedback (no response, or response outside trial window)
+    are dropped.
 
     Returns
     -------
-    List of (onset_seconds, duration_seconds, description) tuples.
+    List of (stim_onset, duration, description) tuples.
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    out = []
+    for _t0, stim_on, _resp_on, fb in _hbn_ccd_pair_trials(events_df):
+        if fb == _HBN_CCD_FEEDBACK_CORRECT:
+            label = "correct"
+        elif fb == _HBN_CCD_FEEDBACK_INCORRECT:
+            label = "incorrect"
+        elif fb == _HBN_CCD_FEEDBACK_NON_TARGET:
+            label = "non_target"
+        else:
+            # No feedback at all (no response paired to this trial) — skip.
+            continue
+        out.append((stim_on, float(event_tlen), label))
+    return out
+
+
+def parse_hbn_ccd_rt(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[float, float, str]]:
+    """
+    Legacy RT-regression parser (pre-unification, kept for archived configs).
+
+    Each valid trial yields one annotation at the stimulus onset with
+    description ``f"rt_{rt:.6f}"`` for regression decoding. Trials with
+    RT < 0.25 s or no response are dropped.
+
+    Prefer :func:`parse_hbn_ccd` (with ``annotation_format: hbn_ccd``) for new
+    configs — it keeps RT available via ``targets/ccd_rt`` without losing
+    the trials useful for other CCD targets.
     """
     events_tsv = _hbn_resolve_events_tsv(src_path)
     events_df = _hbn_read_events(events_tsv)
@@ -1170,19 +1206,10 @@ def parse_hbn_ccd_rt(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[floa
 
 def parse_hbn_ccd_correct(src_path: Path, event_tlen: float = 2.0) -> List[Tuple[float, float, str]]:
     """
-    Extract CCD trial-correctness classification annotations.
+    Legacy correct/incorrect parser (pre-unification).
 
-    Label = 'correct' if the response's feedback is `smiley_face`,
-    'incorrect' if `sad_face`. `non_target` (false alarms outside a
-    proper target window) and trials without a response are skipped.
-
-    The config aligns the 2-s window around the target onset via
-    ``event_tmin: -0.5`` (→ window spans [-0.5, +1.5] s relative to
-    stimulus).
-
-    Returns
-    -------
-    List of (stim_onset, duration, description) tuples.
+    Drops ``non_target`` trials (false alarms) — use :func:`parse_hbn_ccd`
+    for new configs to keep them.
     """
     events_tsv = _hbn_resolve_events_tsv(src_path)
     events_df = _hbn_read_events(events_tsv)
@@ -1193,7 +1220,6 @@ def parse_hbn_ccd_correct(src_path: Path, event_tlen: float = 2.0) -> List[Tuple
         elif fb == _HBN_CCD_FEEDBACK_INCORRECT:
             label = "incorrect"
         else:
-            # `non_target` or missing feedback — skip.
             continue
         out.append((stim_on, float(event_tlen), label))
     return out
@@ -1359,4 +1385,96 @@ def parse_hbn_symbolsearch(
             continue
         label = "correct" if u == c else "incorrect"
         out.append((float(onset), float(event_tlen), label))
+    return out
+
+
+def parse_hbn_seqlearning(
+    src_path: Path,
+    event_tlen: float = 1.0,
+    n_targets: int = 6,
+) -> List[Tuple[float, float, str]]:
+    """
+    seqLearning{6,8}target parser — event-locked on each ``dot_noK_ON`` onset.
+
+    Each window corresponds to one dot in the learning sequence. Description
+    = ``f"dot_{K}"`` where K ∈ 1..n_targets, which serves as an
+    n_targets-way classification target (dot position). Per-window extras
+    (learning_block, sequence_hamming_acc, target_count) live in the
+    ``targets/`` group — see :func:`speed.downstream_targets.hbn_seqlearning_targets`.
+
+    Parameters
+    ----------
+    n_targets : int, default 6
+        6 for seqLearning6target (codes 11..16) or 8 for seqLearning8target
+        (codes 11..18).
+    """
+    events_tsv = _hbn_resolve_events_tsv(src_path)
+    events_df = _hbn_read_events(events_tsv)
+    expected = {f"dot_no{k}_ON" for k in range(1, n_targets + 1)}
+    rows = events_df[events_df["value"].isin(expected)]
+    if len(rows) == 0:
+        logging.warning(f"seqLearning: no dot_ON events in {events_tsv}")
+        return []
+    out = []
+    for onset, val in zip(rows["onset"].to_numpy(), rows["value"].to_numpy()):
+        try:
+            k = int(str(val).split("_no")[1].split("_")[0])
+        except (IndexError, ValueError):
+            continue
+        out.append((float(onset), float(event_tlen), f"dot_{k}"))
+    return out
+
+
+def parse_hbn_movie(
+    src_path: Path,
+    recording_duration: float,
+    event_tlen: float = 30.0,
+    stride: float = 15.0,
+) -> List[Tuple[float, float, str]]:
+    """
+    Fixed strided-window parser for HBN video tasks.
+
+    Emits windows starting at ``video_start`` onset (or 0.0 if the events.tsv
+    is missing), stepping by ``stride`` seconds until ``video_stop`` (or
+    ``recording_duration``) — ``tlen`` s long each. Description = task name
+    parsed from the filename (``DespicableMe`` / ``FunwithFractals`` /
+    ``ThePresent`` / ``DiaryOfAWimpyKid``). Overlap is ``tlen - stride``
+    (callers must then use subject-wise splits to avoid leakage).
+
+    The yaml config declares ``event_tlen: 30.0`` and a new top-level key
+    ``movie_window_stride: 15.0``; ``scripts/preprocess_downstream.py``
+    reads the stride and passes it to the pipeline, which passes it here.
+    """
+    stem = src_path.stem
+    task = ""
+    import re as _re
+    m = _re.search(r"task-([^_]+)", stem)
+    if m:
+        task = m.group(1)
+    if task not in _HBN_MOVIE_TASKS:
+        logging.warning(f"movie: unexpected task '{task}' for {src_path.name}")
+
+    # Locate video_start / video_stop if present — otherwise span the recording.
+    vstart = 0.0
+    vstop = recording_duration
+    try:
+        events_tsv = _hbn_resolve_events_tsv(src_path)
+        events_df = _hbn_read_events(events_tsv)
+        vs = events_df[events_df["value"] == "video_start"]
+        vp = events_df[events_df["value"] == "video_stop"]
+        if len(vs):
+            vstart = float(vs["onset"].iloc[0])
+        if len(vp):
+            vstop = min(vstop, float(vp["onset"].iloc[0]))
+    except FileNotFoundError:
+        pass
+
+    if stride <= 0:
+        raise ValueError(f"movie_window_stride must be > 0, got {stride}")
+
+    out = []
+    onset = vstart
+    while onset + event_tlen <= min(vstop, recording_duration):
+        out.append((float(onset), float(event_tlen), task))
+        onset += stride
     return out

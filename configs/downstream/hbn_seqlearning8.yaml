@@ -1,0 +1,85 @@
+# =============================================================================
+# Downstream Preprocessing Configuration — HBN seqLearning8target
+# =============================================================================
+# One window per `dot_noK_ON` event (K ∈ 1..8). Primary `labels` = K-1
+# (8-class dot-position classification). Extra per-window targets are
+# identical to the 6target variant (see hbn_seqlearning6.yaml) except
+# `seq_target_count=8` and `seq_dot_position` ranges 1..8.
+#
+# Window length 1.0 s covers the dot-onset evoked response (P1 + N1 + P2).
+#
+# Usage:
+#   python scripts/build_hbn_file_lists.py <out_dir>   # produces seqlearning8.txt
+#   python scripts/preprocess_downstream.py \
+#     --config configs/downstream/hbn_seqlearning8.yaml
+# =============================================================================
+
+pipeline:
+  class_path: speed.pipeline.PretrainPipeline
+  init_args:
+    preserve_metadata: true
+
+    event_windowing: true
+    event_labels: ['dot_1', 'dot_2', 'dot_3', 'dot_4', 'dot_5', 'dot_6', 'dot_7', 'dot_8']
+    event_tmin: -0.1
+    event_tlen: 1.0
+    label_mapping:
+      dot_1: 0
+      dot_2: 1
+      dot_3: 2
+      dot_4: 3
+      dot_5: 4
+      dot_6: 5
+      dot_7: 6
+      dot_8: 7
+    annotation_format: "hbn_seqlearning8"
+    task_type: "classification"
+
+    window_length: null
+    shift_seconds: null
+    sfreq: 200.0
+
+    hp_freq: 0.5
+    lp_freq: 50.0
+    line_freqs: [60.0]
+
+    do_ica: false
+    iclabel_threshold: 0.7
+    included_components:
+      - brain
+      - other
+
+    min_nchans: 10
+    montage: null
+    channels: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E15', 'E16', 'E17', 'E18', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24', 'E25', 'E26', 'E27', 'E28', 'E29', 'E30', 'E31', 'E32', 'E33', 'E34', 'E35', 'E36', 'E37', 'E38', 'E39', 'E40', 'E41', 'E42', 'E43', 'E44', 'E45', 'E46', 'E47', 'E48', 'E49', 'E50', 'E51', 'E52', 'E53', 'E54', 'E55', 'E56', 'E57', 'E58', 'E59', 'E60', 'E61', 'E62', 'E63', 'E64', 'E65', 'E66', 'E67', 'E68', 'E69', 'E70', 'E71', 'E72', 'E73', 'E74', 'E75', 'E76', 'E77', 'E78', 'E79', 'E80', 'E81', 'E82', 'E83', 'E84', 'E85', 'E86', 'E87', 'E88', 'E89', 'E90', 'E91', 'E92', 'E93', 'E94', 'E95', 'E96', 'E97', 'E98', 'E99', 'E100', 'E101', 'E102', 'E103', 'E104', 'E105', 'E106', 'E107', 'E108', 'E109', 'E110', 'E111', 'E112', 'E113', 'E114', 'E115', 'E116', 'E117', 'E118', 'E119', 'E120', 'E121', 'E122', 'E123', 'E124', 'E125', 'E126', 'E127', 'E128', 'Cz']
+    channels_to_remove: ['E48', 'E49', 'E56', 'E63', 'E68', 'E73', 'E81', 'E88', 'E94', 'E99', 'E107', 'E113', 'E119', 'E1', 'E8', 'E14', 'E17', 'E21', 'E25', 'E32', 'E125', 'E126', 'E127', 'E128']
+    channels_rename: null
+    standardize_channel_names: false
+
+    oha_threshold: 0.00004
+    thv_threshold: 0.00004
+    chv_threshold: 0.00008
+    min_unique_ratio: 0.001
+    oha_limit: 0.8
+    thv_limit: 0.5
+    chv_limit: 0.5
+    bcr_limit: 0.8
+    drop_bad_quality: true
+    return_quality_metrics: true
+
+    target_montage: null
+    interpolation_mode: accurate
+    use_ransac: true
+    normalize: null
+
+
+dataset_path: "/scratch/agjma/HBN_SPEED/lists/seqlearning8.txt"
+out_path: "/scratch/agjma/HBN_SPEED_downstream/seqlearning8"
+log_path: "/scratch/agjma/HBN_SPEED_downstream/seqlearning8/logs/seqlearning8.log"
+
+overwrite: false
+shuffle_files: false
+batch_size: 100
+n_jobs: 1
+file_extension: ".set"
+log_level: INFO

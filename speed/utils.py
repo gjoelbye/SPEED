@@ -295,6 +295,8 @@ def save_hdf5_with_labels(
     dest_path: Optional[Path] = None,
     quality_metrics: Optional[List[Dict]] = None,
     data_arrays: Optional[List[np.ndarray]] = None,
+    extra_targets: Optional[Dict[str, np.ndarray]] = None,
+    targets_attrs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Save preprocessed windows with labels to HDF5 for downstream tasks.
@@ -310,8 +312,20 @@ def save_hdf5_with_labels(
         file_idxs: (N,) - source file index
         files: (F,) - source filenames
         time_slices: (N, 2) - (start, end) times
+        targets/<key>: (N,) - optional per-window targets (multi-target storage)
         attrs['descriptions']: label descriptions
         attrs['quality_metrics']: optional quality data
+
+    Parameters
+    ----------
+    extra_targets : dict[str, np.ndarray], optional
+        Additional per-window targets to write under the ``targets/`` group.
+        Each value must be a 1-D array of length N with one of these dtypes:
+        int8/int32/int64, float32/float64, or object arrays of Python strings.
+        Written via :func:`add_targets_to_existing_hdf5` after the main datasets
+        are in place.
+    targets_attrs : dict[str, Any], optional
+        Attributes to attach to the ``targets/`` group (e.g. ``event_tmin_used``).
     """
     if data_arrays is None:
         if raws is None:
@@ -344,6 +358,105 @@ def save_hdf5_with_labels(
         # Optional quality metrics
         if quality_metrics is not None:
             f.attrs['quality_metrics'] = str(quality_metrics)
+
+    if extra_targets:
+        add_targets_to_existing_hdf5(
+            dest_path, extra_targets, attrs=targets_attrs, force=True,
+        )
+
+
+def add_targets_to_existing_hdf5(
+    path: Path,
+    extra_targets: Dict[str, np.ndarray],
+    attrs: Optional[Dict[str, Any]] = None,
+    force: bool = False,
+) -> None:
+    """
+    Append a ``targets/`` group with per-window target arrays to an existing HDF5.
+
+    Used by both the preprocessing pipeline (to write ``targets/`` natively at
+    save time) and the migration script ``scripts/augment_hbn_targets.py`` (to
+    augment already-processed buckets in place) — one implementation so
+    forward and migrated files are byte-identical.
+
+    Parameters
+    ----------
+    path : Path
+        HDF5 file to modify (opened in ``'a'`` append mode).
+    extra_targets : dict[str, np.ndarray]
+        ``{target_name → 1-D array of length N}`` where N must match
+        ``f['data'].shape[0]``.
+    attrs : dict, optional
+        Attributes to attach to the ``targets/`` group (merged with existing attrs).
+    force : bool, default False
+        If True, overwrite any pre-existing ``targets/<key>`` datasets. If
+        False (default), skip existing keys and log an info message — safe
+        re-run semantics.
+
+    Dtype handling:
+
+    - string / object arrays → ``h5py.string_dtype()`` (no ``fletcher32`` — h5py
+      refuses the filter on variable-length strings)
+    - integer arrays → preserved (int8 / int32 / int64), with ``fletcher32``
+    - float arrays → float32 with ``fletcher32``
+
+    Raises
+    ------
+    ValueError
+        If any target array length differs from ``f['data'].shape[0]``.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    with h5py.File(path, 'a') as f:
+        n_data = int(f['data'].shape[0])
+        grp = f.require_group('targets')
+        for key, arr in extra_targets.items():
+            arr = np.asarray(arr)
+            if arr.shape[0] != n_data:
+                raise ValueError(
+                    f"extra_targets[{key!r}] length {arr.shape[0]} != "
+                    f"data length {n_data} in {path}"
+                )
+            full_key = f"targets/{key}"
+            if full_key in f:
+                if not force:
+                    logging.info(
+                        f"Skipping existing target {full_key!r} in {path.name} "
+                        f"(pass force=True to overwrite)"
+                    )
+                    continue
+                del f[full_key]
+
+            if arr.dtype.kind in ('U', 'O', 'S'):
+                # Normalise to str then h5py variable-length string.
+                str_arr = np.array(
+                    [s if isinstance(s, str) else ("" if s is None else str(s))
+                     for s in arr],
+                    dtype=h5py.string_dtype(),
+                )
+                grp.create_dataset(key, data=str_arr, dtype=h5py.string_dtype())
+            elif arr.dtype.kind in ('i', 'u'):
+                grp.create_dataset(key, data=arr, dtype=arr.dtype, fletcher32=True)
+            elif arr.dtype.kind == 'f':
+                grp.create_dataset(
+                    key, data=arr.astype(np.float32, copy=False),
+                    dtype=np.float32, fletcher32=True,
+                )
+            elif arr.dtype.kind == 'b':
+                grp.create_dataset(
+                    key, data=arr.astype(np.int8, copy=False),
+                    dtype=np.int8, fletcher32=True,
+                )
+            else:
+                raise TypeError(
+                    f"Unsupported dtype {arr.dtype!r} for target {key!r}"
+                )
+
+        if attrs:
+            for k, v in attrs.items():
+                grp.attrs[k] = v
 
 
 def _round_to_edf8(x: float) -> float:
